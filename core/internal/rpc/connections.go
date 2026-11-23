@@ -3,7 +3,6 @@ package rpc
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 
 	"ThroneCore/gen"
@@ -20,8 +19,11 @@ func connMetaToProto(c *trafficcontrol.TrackerMetadata, ruleItem string) *gen.Co
 		if len(c.Metadata.ProcessInfo.ProcessPaths) > 0 {
 			processPath = c.Metadata.ProcessInfo.ProcessPaths[0]
 		}
-		spl := strings.Split(processPath, string(os.PathSeparator))
-		process = spl[len(spl)-1]
+		if idx := strings.LastIndexAny(processPath, "/\\"); idx >= 0 {
+			process = processPath[idx+1:]
+		} else {
+			process = processPath
+		}
 	}
 	var closedAt int64
 	if !c.ClosedAt.IsZero() {
@@ -68,12 +70,14 @@ func (s *server) QueryConnections(ctx context.Context, in *gen.EmptyReq) (*gen.Q
 
 	connRules.begin(box)
 	defer connRules.end()
-	active := make([]*gen.ConnectionMetaData, 0)
-	for _, c := range tm.Connections() {
+	activeConns := tm.Connections()
+	active := make([]*gen.ConnectionMetaData, 0, len(activeConns))
+	for _, c := range activeConns {
 		active = append(active, connMetaToProto(c, connRules.matched(c)))
 	}
-	closed := make([]*gen.ConnectionMetaData, 0)
-	for _, c := range tm.ClosedConnections() {
+	closedConns := tm.ClosedConnections()
+	closed := make([]*gen.ConnectionMetaData, 0, len(closedConns))
+	for _, c := range closedConns {
 		closed = append(closed, connMetaToProto(c, connRules.matched(c)))
 	}
 	return &gen.QueryConnectionsResp{Active: active, Closed: closed}, nil

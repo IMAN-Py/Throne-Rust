@@ -666,7 +666,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     connect(ui->profilesTableView->verticalScrollBar(), &QScrollBar::valueChanged, ui->profilesTableView, [=, this] {
         if (!ui->profilesTableView->isVisible()) return;
-        refresh_proxy_list_column_size();
+        const auto group = Configs::dataManager->groupsRepo->CurrentGroup();
+        if (!group || !group->column_width.isEmpty()) return;
+        schedule_proxy_list_column_size(100);
     });
     ui->profilesTableView->viewport()->installEventFilter(this);
 
@@ -956,6 +958,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     m_proxyListRefreshDebounce = new QTimer(this);
     m_proxyListRefreshDebounce->setSingleShot(true);
     connect(m_proxyListRefreshDebounce, &QTimer::timeout, this, [this] { refresh_proxy_list({}, false); });
+
+    m_columnResizeDebounce = new QTimer(this);
+    m_columnResizeDebounce->setSingleShot(true);
+    connect(m_columnResizeDebounce, &QTimer::timeout, this, [this] { refresh_proxy_list_column_size_now(); });
 
     connect(host->autoSelector(), &Engine::AutoSelectorController::statusChanged, this, [this] { refresh_auto_selector_view(); });
 

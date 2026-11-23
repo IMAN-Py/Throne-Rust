@@ -1,0 +1,46 @@
+name: Rust Core CI
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - 'throne_fast_core/**'
+      - 'include/throne_fast_core.h'
+      - 'cmake/throne_fast_core.cmake'
+      - '.github/workflows/rust-core.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'throne_fast_core/**'
+      - 'include/throne_fast_core.h'
+      - 'cmake/throne_fast_core.cmake'
+      - '.github/workflows/rust-core.yml'
+
+jobs:
+  test:
+    name: Rust Core Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "throne_fast_core -> throne_fast_core/target"
+
+      - name: Check compilation
+        working-directory: throne_fast_core
+        run: cargo check --release
+
+      - name: Run unit & integration test suite
+        working-directory: throne_fast_core
+        run: cargo test --release --all-targets --verbose

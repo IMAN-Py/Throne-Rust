@@ -49,6 +49,7 @@ namespace Configs {
 
         db.exec("CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name)");
         db.exec("CREATE INDEX IF NOT EXISTS idx_profiles_type ON profiles(type)");
+        db.exec("CREATE INDEX IF NOT EXISTS idx_profiles_gid ON profiles(gid)");
     }
 
     bool ProfilesRepo::profilesColumnExists(const char* columnName) const {
@@ -161,33 +162,55 @@ namespace Configs {
     }
 
     std::shared_ptr<Profile> ProfilesRepo::profileFromRow(SQLite::Statement& stmt) const {
-        QJsonObject json;
-        json["id"] = stmt.getColumn(0).getInt();
-        json["type"] = QString::fromStdString(stmt.getColumn(1).getText());
-        json["name"] = QString::fromStdString(stmt.getColumn(2).getText());
-        json["gid"] = stmt.getColumn(3).getInt();
-        json["latency"] = stmt.getColumn(4).getInt();
-        json["latency_at"] = static_cast<qint64>(stmt.getColumn(5).getInt64());
-        json["dl_speed"] = QString::fromStdString(stmt.getColumn(6).getText());
-        json["ul_speed"] = QString::fromStdString(stmt.getColumn(7).getText());
-        json["test_country"] = QString::fromStdString(stmt.getColumn(8).getText());
-        json["ip_out"] = QString::fromStdString(stmt.getColumn(9).getText());
+        auto profile = std::make_shared<Profile>();
 
-        QString outboundJsonStr = QString::fromStdString(stmt.getColumn(10).getText());
-        QJsonDocument outboundDoc = QJsonDocument::fromJson(outboundJsonStr.toUtf8());
-        if (!outboundDoc.isNull() && outboundDoc.isObject()) {
-            json["outbound"] = outboundDoc.object();
+        profile->id = stmt.getColumn(0).getInt();
+        profile->type = QString::fromUtf8(stmt.getColumn(1).getText(), stmt.getColumn(1).getBytes());
+        profile->name = QString::fromUtf8(stmt.getColumn(2).getText(), stmt.getColumn(2).getBytes());
+        profile->gid = stmt.getColumn(3).getInt();
+        profile->latency = stmt.getColumn(4).getInt();
+        profile->latency_at = static_cast<qint64>(stmt.getColumn(5).getInt64());
+        profile->dl_speed = QString::fromUtf8(stmt.getColumn(6).getText(), stmt.getColumn(6).getBytes());
+        profile->ul_speed = QString::fromUtf8(stmt.getColumn(7).getText(), stmt.getColumn(7).getBytes());
+        profile->test_country = QString::fromUtf8(stmt.getColumn(8).getText(), stmt.getColumn(8).getBytes());
+        profile->ip_out = QString::fromUtf8(stmt.getColumn(9).getText(), stmt.getColumn(9).getBytes());
+
+        Configs::outbound* outbound = Configs::NewOutboundByType(profile->type);
+        profile->outbound = std::shared_ptr<Configs::outbound>(outbound);
+        profile->outbound->profile_id = profile->id;
+
+        const auto outboundCol = stmt.getColumn(10);
+        const char* outboundBytes = outboundCol.getText();
+        const int outboundLen = outboundCol.getBytes();
+        if (outboundBytes && outboundLen > 0) {
+            const QJsonDocument outboundDoc = QJsonDocument::fromJson(QByteArray::fromRawData(outboundBytes, outboundLen));
+            if (!outboundDoc.isNull() && outboundDoc.isObject()) {
+                profile->outbound->ParseFromJson(outboundDoc.object());
+            }
         }
 
-        json["traffic_dl"] = static_cast<qint64>(stmt.getColumn(11).getInt64());
-        json["traffic_up"] = static_cast<qint64>(stmt.getColumn(12).getInt64());
-        if (const auto endpointDoc = QJsonDocument::fromJson(QByteArray(stmt.getColumn(13).getText()));
-            endpointDoc.isObject()) {
-            json["endpoint"] = endpointDoc.object();
-        }
-        json["service_checks"] = QString::fromStdString(stmt.getColumn(14).getText());
+        profile->traffic_downlink = static_cast<qint64>(stmt.getColumn(11).getInt64());
+        profile->traffic_uplink = static_cast<qint64>(stmt.getColumn(12).getInt64());
 
-        return profileFromJson(json);
+        const auto endpointCol = stmt.getColumn(13);
+        const char* endpointBytes = endpointCol.getText();
+        const int endpointLen = endpointCol.getBytes();
+        if (endpointBytes && endpointLen > 0) {
+            const auto endpointDoc = QJsonDocument::fromJson(QByteArray::fromRawData(endpointBytes, endpointLen));
+            if (endpointDoc.isObject()) {
+                profile->endpoint = EndpointSource::FromJson(endpointDoc.object());
+            }
+        }
+
+        profile->service_checks = QString::fromUtf8(stmt.getColumn(14).getText(), stmt.getColumn(14).getBytes());
+
+        if (profile->outbound && !profile->outbound->name.isEmpty()) {
+            profile->name = profile->outbound->name;
+        } else if (profile->outbound && !profile->name.isEmpty()) {
+            profile->outbound->name = profile->name;
+        }
+
+        return profile;
     }
 
     std::shared_ptr<Profile> ProfilesRepo::loadFromDatabase(int id) const {

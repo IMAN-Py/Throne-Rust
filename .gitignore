@@ -89,3 +89,11 @@ out
 srslist.h
 .claude
 .qtcreator
+*.msi
+*.wixpdb
+installer/stage/Throne.exe
+installer/stage/ThroneCore.exe
+installer/stage/libcronet.dll
+installer/stage/updater.exe
+installer/stage/throne_fast_core.dll
+

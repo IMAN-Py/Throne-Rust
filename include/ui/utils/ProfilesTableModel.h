@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QSet>
 #include <QColor>
+#include <list>
 #include <memory>
 
 #include "include/database/entities/GroupSort.h"
@@ -109,19 +110,25 @@ signals:
     void pinnedCountChanged();
 
 private:
-    void ensureCached(int profileId) const;
+    std::shared_ptr<Configs::Profile> ensureCached(int profileId) const;
+    void insertCached(int profileId, const std::shared_ptr<Configs::Profile> &profile) const;
     void evictOne() const;
     void setProfileIds(const QList<int> &ids, int pinnedCount);
     void setPinnedCount(int count);
     void ensureFilterIndex() const;
     void insertFilterKey(int profileId, FilterKey key) const;
 
+    struct CacheEntry {
+        std::shared_ptr<Configs::Profile> profile;
+        std::list<int>::iterator lruIt;
+    };
+
     QList<int> m_profileIds;
     int m_pinnedCount = 0;
     mutable QHash<int, int> id2row;
-    mutable QHash<int, std::shared_ptr<Configs::Profile>> m_cache;
-    mutable QList<int> m_lruOrder;
-    int m_cacheSize = 100;
+    mutable QHash<int, CacheEntry> m_cache;
+    mutable std::list<int> m_lruList;
+    int m_cacheSize = 500;
     // Resolving an endpoint source can query the IP lists, so it runs once per row, not per paint.
     mutable QHash<int, QString> m_addressCache;
 
@@ -129,4 +136,7 @@ private:
     mutable QSet<QString> m_serviceNames;
     mutable QSet<QString> m_serviceWords;
     mutable bool m_filterIndexBuilt = false;
+
+    // Feature 11: Cache for parsed service check JSON results
+    mutable QHash<QString, QList<ServiceFilterKey>> m_serviceCheckCache;
 };

@@ -1,0 +1,34 @@
+# GitHub Linguist Configuration for Throne-Rust
+# Highlights the high-performance native Rust core engine and FFI bindings
+# as the primary languages of this fork repository.
+
+# Upstream inherited desktop UI and protocol engines
+*.cpp linguist-vendored
+*.cxx linguist-vendored
+*.cc linguist-vendored
+*.c linguist-vendored
+*.h linguist-vendored
+*.hpp linguist-vendored
+*.go linguist-vendored
+*.sh linguist-vendored
+*.ps1 linguist-vendored
+*.cmake linguist-vendored
+*.py linguist-vendored
+*.ui linguist-vendored
+*.qss linguist-vendored
+
+# Exclude vendored assets, installer packages, and docs
+3rdparty/** linguist-vendored
+installer/** linguist-vendored
+res/** linguist-vendored
+script/** linguist-vendored
+docs/** linguist-documentation
+.github/** linguist-vendored
+
+# High-Performance Rust Acceleration Engine & Native FFI (Active Development)
+*.rs linguist-detectable=true
+*.rs -linguist-vendored
+throne_fast_core/** linguist-detectable=true
+throne_fast_core/** -linguist-vendored
+include/throne_fast_core.h linguist-detectable=true
+include/throne_fast_core.h -linguist-vendored

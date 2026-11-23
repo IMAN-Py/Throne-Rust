@@ -69,16 +69,19 @@ void MainWindow::applyTopBarMetrics() {
 void MainWindow::UpdateDataView(bool force)
 {
     const auto now = QDateTime::currentMSecsSinceEpoch();
-    if (!force && now - lastUpdatedMs.load() < 100)
+    const auto last = lastUpdatedMs.load(std::memory_order_relaxed);
+    if (!force && (now - last < 100))
     {
         return;
     }
+    lastUpdatedMs.store(now, std::memory_order_relaxed);
     auto content = dataViewHtmlGenerator_.build();
-    runOnUiThread([=, this] {
-        ui->data_view->setHtml(content.html);
-        ui->data_view->setToolTip(content.toolTip);
-    }, true);
-    lastUpdatedMs.store(QDateTime::currentMSecsSinceEpoch());
+    QPointer<MainWindow> self(this);
+    runOnUiThread([self, content = std::move(content)] {
+        if (!self || !self->ui || !self->ui->data_view) return;
+        self->ui->data_view->setHtml(content.html);
+        self->ui->data_view->setToolTip(content.toolTip);
+    }, false);
 }
 
 void MainWindow::testPanelSeeded(Engine::TestKind kind, int totalProfiles, const QList<int> &profileIds)
@@ -463,11 +466,50 @@ void MainWindow::refresh_traffic_graph_settings() {
     }
 }
 
+void MainWindow::schedule_proxy_list_column_size(int delayMs) {
+    if (!m_columnResizeDebounce) return;
+    if (!ui->profilesTableView->isVisible()) return;
+    const auto group = Configs::dataManager->groupsRepo->CurrentGroup();
+    if (!group) return;
+
+    if (m_columnResizeDebounce->isActive()) {
+        if (delayMs == 0 && m_columnResizeDebounce->remainingTime() > 0) {
+            m_columnResizeDebounce->start(0);
+        } else if (delayMs > 0) {
+            m_columnResizeDebounce->start(delayMs);
+        }
+        return;
+    }
+    m_columnResizeDebounce->start(delayMs);
+}
+
 void MainWindow::refresh_proxy_list_column_size() {
+    const auto group = Configs::dataManager->groupsRepo->CurrentGroup();
+    if (group && !group->column_width.isEmpty()) {
+        auto *hHeader = dynamic_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader());
+        if (hHeader && ui->profilesTableView->horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded) {
+            bool matches = true;
+            constexpr int columnCount = ProfilesTableModel::ColumnCount;
+            if (group->column_width.size() == columnCount) {
+                for (int i = 0; i < columnCount; ++i) {
+                    if (hHeader->sectionSize(i) != group->column_width.at(i)) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) return;
+            }
+        }
+    }
+    schedule_proxy_list_column_size(0);
+}
+
+void MainWindow::refresh_proxy_list_column_size_now() {
     const auto group = Configs::dataManager->groupsRepo->CurrentGroup();
     if (!group || !ui->profilesTableView->isVisible()) return;
 
     auto *hHeader = dynamic_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader());
+    if (!hHeader) return;
     QTimer::singleShot(0, ui->profilesTableView, [=, this]() {
         // The resizeSection / scrollbar-policy changes below re-enter here via valueChanged.
         if (m_adjustingColumns || group != Configs::dataManager->groupsRepo->CurrentGroup()) return;
@@ -518,10 +560,17 @@ void MainWindow::refresh_proxy_list_column_size() {
             }
             ui->profilesTableView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
         }
-        hHeader->adjustPositions();
-        vBar->blockSignals(vBarBlocked);
-        m_adjustingColumns = false;
-    });
+    } else {
+        group->clearCalculatedColumnWidth();
+        for (int i = 0; i < columnCount; i++) {
+            hHeader->setSectionResizeMode(i, QHeaderView::Interactive);
+            hHeader->resizeSection(i, group->column_width.at(i));
+        }
+        ui->profilesTableView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    }
+    hHeader->adjustPositions();
+    vBar->blockSignals(vBarBlocked);
+    m_adjustingColumns = false;
 }
 
 void MainWindow::refresh_proxy_list(const QList<int>& ids, bool mayNeedReset, RefreshAnchor anchor) {

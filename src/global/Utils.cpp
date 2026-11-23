@@ -8,6 +8,7 @@
 #include <mutex>
 #include <random>
 #include <utility>
+#include <vector>
 
 #include <QApplication>
 #include <QUrlQuery>
@@ -34,7 +35,20 @@
 #include <QTextBoundaryFinder>
 
 #ifdef Q_OS_WIN
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include "include/sys/windows/guihelper.h"
+#ifdef SetPort
+#undef SetPort
+#endif
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #endif
 #ifdef Q_OS_MAC
 #include <ApplicationServices/ApplicationServices.h>
@@ -187,13 +201,12 @@ QString QJsonObject2QString(const QJsonObject &jsonObject, bool compact) {
 }
 
 QJsonArray QListStr2QJsonArray(const QList<QString> &list) {
-    QVariantList list2;
+    QJsonArray arr;
     for (const auto &item: list) {
         if (QStringView(item).trimmed().isEmpty()) continue;
-        list2.append(item);
+        arr.append(item);
     }
-
-    return list2.isEmpty() ? QJsonArray{} : QJsonArray::fromVariantList(list2);
+    return arr;
 }
 
 QJsonArray QListInt2QJsonArray(const QList<int> &list) {
@@ -213,6 +226,7 @@ QList<int> QJsonArray2QListInt(const QJsonArray &arr) {
 
 QList<QString> QJsonArray2QListString(const QJsonArray &arr) {
     QList<QString> list2;
+    list2.reserve(arr.size());
     for (auto item: arr)
         list2.append(item.toString());
     return list2;
@@ -260,40 +274,117 @@ QString ReadFileText(const QString &path) {
     return stream.readAll();
 }
 
-static bool listenWithRetry(QTcpServer *server, const QString &address) {
-    QHostAddress bindAddress;
-    const bool anyInterface = address.isEmpty() || !bindAddress.setAddress(address);
-    for (int attempt = 0; attempt < 3; attempt++) {
-        if (!anyInterface && server->listen(bindAddress)) return true;
-        if (anyInterface && (server->listen(QHostAddress::Any) || server->listen(QHostAddress::AnyIPv4))) return true;
+namespace {
+#ifdef Q_OS_WIN
+    using raw_socket_t = SOCKET;
+    using socklen_type = int;
+    constexpr raw_socket_t kInvalidSocketHandle = INVALID_SOCKET;
+    inline int closeRawSocket(raw_socket_t s) { return ::closesocket(s); }
+
+    struct WinsockInitScope {
+        WinsockInitScope() {
+            WSADATA wsa;
+            ::WSAStartup(MAKEWORD(2, 2), &wsa);
+        }
+        ~WinsockInitScope() {
+            ::WSACleanup();
+        }
+    };
+#else
+    using raw_socket_t = int;
+    using socklen_type = socklen_t;
+    constexpr raw_socket_t kInvalidSocketHandle = -1;
+    inline int closeRawSocket(raw_socket_t s) { return ::close(s); }
+#endif
+
+    raw_socket_t openAndBindEphemeralSocket(const QString &address, int &outPort) {
+        outPort = 0;
+        QHostAddress hostAddr;
+        const bool hasExplicit = !address.isEmpty() && hostAddr.setAddress(address);
+        const bool isIPv6 = hasExplicit && (hostAddr.protocol() == QAbstractSocket::IPv6Protocol);
+
+        raw_socket_t sock = kInvalidSocketHandle;
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            if (isIPv6) {
+                sock = ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+                if (sock == kInvalidSocketHandle) continue;
+
+                sockaddr_in6 addr6{};
+                addr6.sin6_family = AF_INET6;
+                addr6.sin6_port = 0;
+                const Q_IPV6ADDR ip6 = hostAddr.toIPv6Address();
+                memcpy(&addr6.sin6_addr, &ip6, sizeof(ip6));
+
+                if (::bind(sock, reinterpret_cast<const sockaddr*>(&addr6), sizeof(addr6)) == 0) {
+                    socklen_type len = sizeof(addr6);
+                    if (::getsockname(sock, reinterpret_cast<sockaddr*>(&addr6), &len) == 0) {
+                        outPort = ntohs(addr6.sin6_port);
+                        return sock;
+                    }
+                }
+                closeRawSocket(sock);
+                sock = kInvalidSocketHandle;
+            } else {
+                sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                if (sock == kInvalidSocketHandle) continue;
+
+                sockaddr_in addr4{};
+                addr4.sin_family = AF_INET;
+                addr4.sin_port = 0;
+                if (hasExplicit) {
+                    addr4.sin_addr.s_addr = htonl(hostAddr.toIPv4Address());
+                } else {
+                    addr4.sin_addr.s_addr = htonl(INADDR_ANY);
+                }
+
+                if (::bind(sock, reinterpret_cast<const sockaddr*>(&addr4), sizeof(addr4)) == 0) {
+                    socklen_type len = sizeof(addr4);
+                    if (::getsockname(sock, reinterpret_cast<sockaddr*>(&addr4), &len) == 0) {
+                        outPort = ntohs(addr4.sin_port);
+                        return sock;
+                    }
+                }
+                closeRawSocket(sock);
+                sock = kInvalidSocketHandle;
+            }
+        }
+        return kInvalidSocketHandle;
     }
-    MW_show_log("[Ports] could not reserve a local port on " + (anyInterface ? "any interface" : address) +
-                ": " + server->errorString());
-    return false;
-}
+} // namespace
 
 int MkPort(const QString &address) {
-    QTcpServer s;
-    if (!listenWithRetry(&s, address)) return 0;
-    auto port = s.serverPort();
-    s.close();
-    return port;
+    const auto ports = MkManyPorts(1, address);
+    return ports.isEmpty() ? 0 : ports.first();
 }
 
 QList<int> MkManyPorts(int num, const QString &address) {
+    if (num <= 0) return {};
+
+#ifdef Q_OS_WIN
+    WinsockInitScope wsa;
+#endif
+
     QList<int> res;
-    QList<QTcpServer*> servers;
-    for (int i=0;i<num;i++) {
-        auto server = new QTcpServer();
-        listenWithRetry(server, address);
-        servers.append(server);
-        res.append(server->serverPort());
+    res.reserve(num);
+
+    std::vector<raw_socket_t> sockets;
+    sockets.reserve(num);
+
+    for (int i = 0; i < num; ++i) {
+        int port = 0;
+        raw_socket_t sock = openAndBindEphemeralSocket(address, port);
+        if (sock != kInvalidSocketHandle && port > 0) {
+            sockets.push_back(sock);
+            res.append(port);
+        } else {
+            MW_show_log("[Ports] could not reserve a local port on " + (address.isEmpty() ? QStringLiteral("any interface") : address));
+        }
     }
-    for (const auto s: servers) {
-        s->close();
-        delete s;
+
+    for (raw_socket_t s : sockets) {
+        closeRawSocket(s);
     }
-    servers.clear();
+
     return res;
 }
 
@@ -504,34 +595,15 @@ QString ResolveLogFontFamily(const QString &preferred) {
 
 void runOnUiThread(const std::function<void()> &callback, bool wait) {
     auto *app = QCoreApplication::instance();
-    if (app == nullptr) return;
-    auto thread = app->thread();
-    if (thread == QThread::currentThread()) {
+    if (app == nullptr || QCoreApplication::closingDown()) return;
+    if (app->thread() == QThread::currentThread()) {
         callback();
         return;
     }
-    if (!wait) {
+    if (wait) {
+        QMetaObject::invokeMethod(app, callback, Qt::BlockingQueuedConnection);
+    } else {
         QMetaObject::invokeMethod(app, callback, Qt::QueuedConnection);
-        return;
-    }
-    auto *timer = new QTimer();
-    timer->moveToThread(thread);
-    timer->setSingleShot(true);
-
-    QEventLoop loop;
-    QObject::connect(timer, &QTimer::timeout, [=, &loop]() {
-        callback();
-        timer->deleteLater();
-
-        if (wait)
-        {
-            QMetaObject::invokeMethod(&loop, "quit", Qt::QueuedConnection);
-        }
-    });
-    QMetaObject::invokeMethod(timer, "start", Qt::QueuedConnection, Q_ARG(int, 0));
-
-    if (wait && QThread::currentThread() != thread) {
-        loop.exec();
     }
 }
 

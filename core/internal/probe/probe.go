@@ -143,7 +143,6 @@ func runBatch[T any](ctx context.Context, i Box, outboundTags []string, maxConcu
 		default:
 		}
 
-		time.Sleep(2 * time.Millisecond) // don't spawn goroutines too quickly
 		limiter <- struct{}{}
 		go func(t string) {
 			defer wg.Done()

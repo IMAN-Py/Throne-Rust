@@ -11,6 +11,7 @@
 #include "include/global/LocalNetwork.hpp"
 
 #include <algorithm>
+#include <unordered_map>
 
 
 
@@ -99,8 +100,56 @@ namespace Stats
         outboundNames_ = names;
     }
 
+    namespace
+    {
+        static const QString s_netTcp = QStringLiteral("tcp");
+        static const QString s_netUdp = QStringLiteral("udp");
+        static const QString s_protoHttp = QStringLiteral("http");
+        static const QString s_protoTls = QStringLiteral("tls");
+        static const QString s_protoQuic = QStringLiteral("quic");
+        static const QString s_protoDns = QStringLiteral("dns");
+        static const QString s_unknown = QStringLiteral("Unknown");
+
+        inline QString internNetwork(const std::string& net)
+        {
+            if (net == "tcp") return s_netTcp;
+            if (net == "udp") return s_netUdp;
+            if (net.empty()) return QString();
+            return QString::fromStdString(net);
+        }
+
+        inline QString internProtocol(const std::string& proto)
+        {
+            if (proto.empty()) return QString();
+            if (proto == "http") return s_protoHttp;
+            if (proto == "tls") return s_protoTls;
+            if (proto == "quic") return s_protoQuic;
+            if (proto == "dns") return s_protoDns;
+            return QString::fromStdString(proto);
+        }
+
+        class StringCache
+        {
+        public:
+            QString getOrInsert(const std::string& str)
+            {
+                if (str.empty()) return QString();
+                auto it = cache_.find(str);
+                if (it != cache_.end()) return it->second;
+                if (cache_.size() >= 1024) cache_.clear();
+                QString qstr = QString::fromStdString(str);
+                cache_.emplace(str, qstr);
+                return qstr;
+            }
+        private:
+            std::unordered_map<std::string, QString> cache_;
+        };
+    }
+
     static ConnectionMetadata metaFromProto(const libcore::ConnectionMetaData& conn, const QString& localLabel,
-                                            const QHash<QString, QString>& outboundNames)
+                                            const QHash<QString, QString>& outboundNames,
+                                            StringCache& cache,
+                                            QHash<QString, bool>& ownAddressCache)
     {
         ConnectionMetadata c;
         c.id = QString::fromStdString(conn.id.value());
@@ -109,20 +158,37 @@ namespace Stats
         c.upload = conn.upload.value();
         c.download = conn.download.value();
         c.domain = QString::fromStdString(conn.domain.value());
-        c.network = QString::fromStdString(conn.network.value());
-        c.outbound = QString::fromStdString(conn.outbound.value());
+        c.network = internNetwork(conn.network.value());
+        c.outbound = cache.getOrInsert(conn.outbound.value());
         c.outboundName = outboundNames.value(c.outbound);
         if (c.outboundName.isEmpty()) c.outboundName = c.outbound;
-        c.process = QString::fromStdString(conn.process.value());
-        c.processPath = QString::fromStdString(conn.process_path.value());
-        c.protocol = QString::fromStdString(conn.protocol.value());
+        c.process = cache.getOrInsert(conn.process.value());
+        c.processPath = cache.getOrInsert(conn.process_path.value());
+        c.protocol = internProtocol(conn.protocol.value());
         c.closedAtMs = conn.closed_at.value();
-        c.rule = QString::fromStdString(conn.rule.value());
-        c.ruleItem = QString::fromStdString(conn.rule_item.value());
+        c.rule = cache.getOrInsert(conn.rule.value());
+        c.ruleItem = cache.getOrInsert(conn.rule_item.value());
         c.source = QString::fromStdString(conn.source.value());
         // In tun mode our own traffic enters with the tun's (or this machine's LAN) address, so a loopback-only test would label it a LAN client.
         const QString host = EndpointHost(c.source);
-        c.sourceLocal = host.isEmpty() || LocalNetwork::IsOwnAddress(host);
+        if (host.isEmpty())
+        {
+            c.sourceLocal = true;
+        }
+        else
+        {
+            auto it = ownAddressCache.constFind(host);
+            if (it != ownAddressCache.constEnd())
+            {
+                c.sourceLocal = it.value();
+            }
+            else
+            {
+                const bool isOwn = LocalNetwork::IsOwnAddress(host);
+                ownAddressCache.insert(host, isOwn);
+                c.sourceLocal = isOwn;
+            }
+        }
         c.sourceDisplay = c.sourceLocal ? localLabel : host;
         return c;
     }
@@ -193,6 +259,9 @@ namespace Stats
             outboundNames = outboundNames_;
         }
 
+        StringCache stringCache;
+        QHash<QString, bool> ownAddressCache;
+
         QList<ConnectionMetadata> rows;
         rows.reserve(static_cast<qsizetype>(resp.active.size()));
         QHash<QString, SpeedSample> newSamples;
@@ -200,7 +269,7 @@ namespace Stats
 
         for (const auto& conn : resp.active)
         {
-            auto c = metaFromProto(conn, localLabel, outboundNames);
+            auto c = metaFromProto(conn, localLabel, outboundNames, stringCache, ownAddressCache);
 
             SpeedSample s;
             if (const auto it = speedSamples_.constFind(c.id); it != speedSamples_.constEnd())
@@ -241,11 +310,12 @@ namespace Stats
         if (!Configs::dataManager->settingsRepo->disable_traffic_stats)
         {
             QHash<QString, QPair<qint64, qint64>> newLast;
+            newLast.reserve(rows.size());
             QSet<QString> currentClosed;
+            currentClosed.reserve(static_cast<qsizetype>(resp.closed.size()));
 
-            auto credit = [&](const libcore::ConnectionMetaData& cm, qint64 curUp, qint64 curDown)
+            auto credit = [&](const QString& id, const QString& proc, const QString& procPath, qint64 curUp, qint64 curDown)
             {
-                const QString id = QString::fromStdString(cm.id.value());
                 qint64 baseUp = 0, baseDown = 0;
                 if (const auto it = lastBytes_.constFind(id); it != lastBytes_.constEnd())
                 {
@@ -257,24 +327,23 @@ namespace Stats
                 if (dUp < 0) dUp = 0;
                 if (dDown < 0) dDown = 0;
                 if (dUp == 0 && dDown == 0) return;
-                QString name = QString::fromStdString(cm.process.value());
-                if (name.isEmpty()) name = "Unknown";
-                trafficStatsManager->AddAppDelta(name, QString::fromStdString(cm.process_path.value()), dUp, dDown);
+                const QString& name = proc.isEmpty() ? s_unknown : proc;
+                trafficStatsManager->AddAppDelta(name, procPath, dUp, dDown);
             };
 
-            for (const auto& cm : resp.active)
+            for (const auto& r : rows)
             {
-                const qint64 up = cm.upload.value();
-                const qint64 down = cm.download.value();
-                credit(cm, up, down);
-                newLast.insert(QString::fromStdString(cm.id.value()), {up, down});
+                credit(r.id, r.process, r.processPath, r.upload, r.download);
+                newLast.insert(r.id, {r.upload, r.download});
             }
             for (const auto& cm : resp.closed)
             {
                 const QString id = QString::fromStdString(cm.id.value());
                 currentClosed.insert(id);
                 if (accountedClosed_.contains(id)) continue;
-                credit(cm, cm.upload.value(), cm.download.value());
+                const QString proc = stringCache.getOrInsert(cm.process.value());
+                const QString procPath = stringCache.getOrInsert(cm.process_path.value());
+                credit(id, proc, procPath, cm.upload.value(), cm.download.value());
             }
             lastBytes_ = newLast;             // drop evicted / now-closed live ids
             accountedClosed_ = currentClosed; // everything in the ring is accounted
@@ -288,7 +357,7 @@ namespace Stats
             for (const auto& row : rows) openIds.insert(row.id);
             for (const auto& conn : resp.closed)
             {
-                auto c = metaFromProto(conn, localLabel, outboundNames);
+                auto c = metaFromProto(conn, localLabel, outboundNames, stringCache, ownAddressCache);
                 // A connection that closed while the core listed it shows up in both lists.
                 if (!openIds.contains(c.id)) apiRows.append(std::move(c));
             }

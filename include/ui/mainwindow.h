@@ -465,6 +465,8 @@ private:
     void import_text(const QString &text);
 
     void refresh_proxy_list_column_size();
+    void refresh_proxy_list_column_size_now();
+    void schedule_proxy_list_column_size(int delayMs = 0);
 
     void refresh_sort_indicator();
 
@@ -510,6 +512,7 @@ private:
     QSize designMinimumSize;
 
     QTimer *m_proxyListRefreshDebounce = nullptr;
+    QTimer *m_columnResizeDebounce = nullptr;
     void scheduleProxyListRefresh();
 
     bool m_adjustingColumns = false;

@@ -1,6 +1,11 @@
+# ============================================================================
+# Throne-Fast: High-Performance Fork of Throne (version 1.4.2-fast)
+# Ultra-Low-Latency GUI Proxy Utility powered by sing-box & Rust Acceleration
+# ============================================================================
+
 cmake_minimum_required(VERSION 3.20)
 
-project(Throne VERSION 0.1)
+project(Throne VERSION 1.4.2)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
@@ -35,6 +40,18 @@ if (UNIX AND NOT APPLE)
 endif ()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network LinguistTools ${QT_DBUS_COMPONENT})
+
+# Default versioning for Throne-Fast
+if (NOT DEFINED INPUT_VERSION OR INPUT_VERSION STREQUAL "")
+    set(INPUT_VERSION "1.4.2-fast")
+endif ()
+
+# Fork branding and feature options
+option(ENABLE_THRONE_FAST_CORE "Build and integrate Rust acceleration core" ON)
+add_compile_definitions(
+    THRONE_FAST_FORK="1.4.2-fast"
+    THRONE_BRANDING_NAME="Throne-Fast"
+)
 
 include("cmake/nkr.cmake")
 
@@ -898,6 +915,9 @@ if (THRONE_ENGINE_LINT)
             VERBATIM)
     add_dependencies(Throne engine_boundary)
 endif ()
+
+# Rust acceleration core (throne_fast_core)
+include("cmake/throne_fast_core.cmake")
 
 # Target
 

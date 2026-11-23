@@ -230,10 +230,25 @@ namespace Configs
                 const auto front = group->front_proxy_id >= 0
                                        ? dataManager->profilesRepo->GetProfile(group->front_proxy_id)
                                        : nullptr;
-                for (int id : group->DisplayedProfiles()) {
+                const auto groupProfileIds = group->DisplayedProfiles();
+                QList<int> candidateIds;
+                candidateIds.reserve(groupProfileIds.size());
+                for (int id : groupProfileIds) {
                     if (id == ent->id || seen.contains(id)) continue;
                     seen.insert(id);
-                    auto member = dataManager->profilesRepo->GetProfile(id);
+                    candidateIds << id;
+                }
+                if (candidateIds.isEmpty()) continue;
+
+                const auto batch = dataManager->profilesRepo->GetProfileBatch(candidateIds);
+                QHash<int, std::shared_ptr<Profile>> profileMap;
+                profileMap.reserve(batch.size());
+                for (const auto &p : batch) {
+                    if (p != nullptr) profileMap.insert(p->id, p);
+                }
+
+                for (int id : candidateIds) {
+                    auto member = profileMap.value(id, nullptr);
                     if (plan != nullptr) plan->membersInGroups++;
                     const auto skip = eligibilityOf(member, filters);
                     if (skip != AutoSelectorSkip::None) {

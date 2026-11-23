@@ -35,16 +35,26 @@ namespace Subscription {
         constexpr qsizetype kMaxHeaderValue = 1000;
         constexpr int kValidityCheckThreads = 10;
 
-        QByteArray digest(const QByteArray &data) {
+        inline QByteArray digest(const QByteArray &data) {
             return QCryptographicHash::hash(data, QCryptographicHash::Sha256);
         }
 
         QByteArray contentKeyOf(const Configs::Profile &ent) {
-            return digest(QJsonDocument(ent.outbound->ExportToJson()).toJson(QJsonDocument::Compact));
+            if (!ent.outbound) return {};
+            return QCryptographicHash::hash(
+                QJsonDocument(ent.outbound->ExportToJson()).toJson(QJsonDocument::Compact),
+                QCryptographicHash::Sha256
+            );
         }
 
         QByteArray identityKeyOf(const Configs::Profile &ent) {
-            return digest(ent.type.toUtf8() + '|' + QJsonDocument(ent.outbound->ExportIdentity()).toJson(QJsonDocument::Compact));
+            if (!ent.outbound) return {};
+            QCryptographicHash hasher(QCryptographicHash::Sha256);
+            const QByteArray typeBytes = ent.type.toUtf8();
+            hasher.addData(typeBytes.constData(), typeBytes.size());
+            hasher.addData("|", 1);
+            hasher.addData(QJsonDocument(ent.outbound->ExportIdentity()).toJson(QJsonDocument::Compact));
+            return hasher.result();
         }
 
         bool usableHeaderValue(const QString &value) {

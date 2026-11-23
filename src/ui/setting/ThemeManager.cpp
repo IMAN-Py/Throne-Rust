@@ -425,14 +425,30 @@ void ThemeManager::ApplyTheme(const QString &theme, bool force) {
     QString sheet = themeSheet + overlayStyleSheet(tokens);
     if (windows11Tabs) sheet += windows11TabStyleSheet(qApp->palette(), tokens);
     if (macosPane) sheet += macPaneStyleSheet(tokens);
-    qApp->setStyleSheet(sheet);
+
+    if (qApp->styleSheet() == sheet) {
+        current_theme = theme;
+        return;
+    }
+
+    // Ensure the QStyleSheetStyle proxy is installed before resetting the platform font table.
+    // When no stylesheet is active, setting a minimal dummy sheet forces QStyleSheetStyle proxy
+    // creation and setStyle() font table population with zero parse overhead, rather than
+    // parsing and repolishing the full 56 KB stylesheet twice.
+    const bool hadStyleSheet = qApp->style()->inherits("QStyleSheetStyle") && !qApp->styleSheet().isEmpty();
+    if (!hadStyleSheet) {
+        qApp->setStyleSheet(QStringLiteral("/*init*/"));
+    }
 
     // Every setStyle() above - setStyleSheet() runs one itself whenever it installs or drops the
     // proxy - refills Qt's per-class platform font table (QMenu/QAbstractItemView/QMessageBox...),
-    // which outranks the app font. Re-asserting the font drops the table; the second sheet call is
-    // a plain repolish that re-resolves the widgets the table already stamped (#1829).
+    // which outranks the app font. Re-asserting the font drops the table (#1829).
     qApp->setFont(qApp->font());
-    qApp->setStyleSheet(sheet);
+
+    // Single batched parse and repolish pass: only applied if the sheet actually changed.
+    if (qApp->styleSheet() != sheet) {
+        qApp->setStyleSheet(sheet);
+    }
 
     current_theme = theme;
     standardIcons.clear();

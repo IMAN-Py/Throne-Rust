@@ -68,30 +68,70 @@ QMimeData* ProfilesTableModel::mimeData(const QModelIndexList &indexes) const {
     return mimeData;
 }
 
-void ProfilesTableModel::ensureCached(int profileId) const {
-    if (m_cache.contains(profileId)) {
-        for (int i = 0; i < m_lruOrder.size(); ++i) {
-            if (m_lruOrder[i] == profileId) {
-                m_lruOrder.move(i, m_lruOrder.size() - 1);
-                break;
-            }
+void ProfilesTableModel::insertCached(int profileId, const std::shared_ptr<Configs::Profile> &profile) const {
+    if (!profile) return;
+    auto it = m_cache.find(profileId);
+    if (it != m_cache.end()) {
+        it->profile = profile;
+        if (it->lruIt != std::prev(m_lruList.end())) {
+            m_lruList.splice(m_lruList.end(), m_lruList, it->lruIt);
         }
         return;
     }
 
-    auto profile = Configs::dataManager->profilesRepo->GetProfile(profileId);
-    if (!profile) return;
-
-    while (m_cache.size() >= m_cacheSize && !m_lruOrder.isEmpty()) {
+    while (static_cast<int>(m_cache.size()) >= m_cacheSize && !m_lruList.empty()) {
         evictOne();
     }
-    m_cache[profileId] = profile;
-    m_lruOrder.append(profileId);
+    m_lruList.push_back(profileId);
+    auto lruIt = std::prev(m_lruList.end());
+    m_cache.insert(profileId, CacheEntry{profile, lruIt});
+}
+
+std::shared_ptr<Configs::Profile> ProfilesTableModel::ensureCached(int profileId) const {
+    auto it = m_cache.find(profileId);
+    if (it != m_cache.end()) {
+        // True O(1) LRU promotion via std::list::splice (pointer relinking only)
+        if (it->lruIt != std::prev(m_lruList.end())) {
+            m_lruList.splice(m_lruList.end(), m_lruList, it->lruIt);
+        }
+        return it->profile;
+    }
+
+    // Prefetch window around requested profile using GetProfileBatch
+    int row = id2row.value(profileId, -1);
+    if (row >= 0) {
+        int windowStart = std::max(0, row - 16);
+        int windowEnd = std::min(static_cast<int>(m_profileIds.size()), row + 48);
+        QList<int> toFetch;
+        for (int i = windowStart; i < windowEnd; ++i) {
+            int id = m_profileIds[i];
+            if (!m_cache.contains(id)) {
+                toFetch.append(id);
+            }
+        }
+        if (!toFetch.isEmpty()) {
+            auto batch = Configs::dataManager->profilesRepo->GetProfileBatch(toFetch);
+            for (const auto &p : batch) {
+                if (p) insertCached(p->id, p);
+            }
+        }
+        auto afterBatch = m_cache.find(profileId);
+        if (afterBatch != m_cache.end()) return afterBatch->profile;
+    }
+
+    // Fallback single query if not retrieved in batch
+    auto profile = Configs::dataManager->profilesRepo->GetProfile(profileId);
+    if (profile) {
+        insertCached(profileId, profile);
+        return profile;
+    }
+    return nullptr;
 }
 
 void ProfilesTableModel::evictOne() const {
-    if (m_lruOrder.isEmpty()) return;
-    int id = m_lruOrder.takeFirst();
+    if (m_lruList.empty()) return;
+    int id = m_lruList.front();
+    m_lruList.pop_front();
     m_cache.remove(id);
     m_addressCache.remove(id);
 }
@@ -108,10 +148,7 @@ QVariant ProfilesTableModel::data(const QModelIndex &index, int role) const {
     if (role == PinnedRole) {
         return isPinnedRow(index.row());
     }
-    ensureCached(profileId);
-    auto it = m_cache.constFind(profileId);
-    if (it == m_cache.constEnd()) return {};
-    const std::shared_ptr<Configs::Profile> &profile = it.value();
+    const auto profile = ensureCached(profileId);
     if (!profile) return {};
     if (role == ServiceItemsRole) {
         if (index.column() != ColExitIP || !showsServices(*profile)) return {};
@@ -205,15 +242,18 @@ void ProfilesTableModel::setProfileIds(const QList<int> &ids, int pinnedCount) {
     m_profileIds = ids;
     m_pinnedCount = std::clamp(pinnedCount, 0, static_cast<int>(ids.size()));
     id2row.clear();
+    id2row.reserve(ids.size());
     int idx=0;
     for (const auto &id : ids) {
         id2row.insert(id, idx++);
     }
+    m_cacheSize = std::clamp(static_cast<int>(ids.size()) + 200, 500, 10000);
     m_cache.clear();
-    m_lruOrder.clear();
+    m_lruList.clear();
     m_addressCache.clear();
     m_filterKeys.clear();
     m_filterIndexBuilt = false;
+    m_serviceCheckCache.clear();
     endResetModel();
     if (m_pinnedCount != oldPinned) emit pinnedCountChanged();
 }
@@ -226,7 +266,7 @@ void ProfilesTableModel::setPinnedCount(int count) {
 }
 
 namespace {
-    QList<ProfilesTableModel::ServiceFilterKey> serviceFilterKeys(const QString &serviceChecks) {
+    QList<ProfilesTableModel::ServiceFilterKey> parseServiceFilterKeys(const QString &serviceChecks) {
         if (serviceChecks.isEmpty()) return {};
         const auto root = QJsonDocument::fromJson(serviceChecks.toUtf8()).object();
         if (!root["error"].toString().isEmpty()) return {};
@@ -256,11 +296,26 @@ namespace {
         return services;
     }
 
-    ProfilesTableModel::FilterKey makeFilterKey(const std::shared_ptr<Configs::Profile> &profile) {
+    QList<ProfilesTableModel::ServiceFilterKey> getServiceFilterKeys(
+        const QString &serviceChecks,
+        QHash<QString, QList<ProfilesTableModel::ServiceFilterKey>> &cache)
+    {
+        if (serviceChecks.isEmpty()) return {};
+        auto it = cache.constFind(serviceChecks);
+        if (it != cache.constEnd()) return it.value();
+        auto parsed = parseServiceFilterKeys(serviceChecks);
+        cache.insert(serviceChecks, parsed);
+        return parsed;
+    }
+
+    ProfilesTableModel::FilterKey makeFilterKey(
+        const std::shared_ptr<Configs::Profile> &profile,
+        QHash<QString, QList<ProfilesTableModel::ServiceFilterKey>> &cache)
+    {
         ProfilesTableModel::FilterKey key;
         key.type = profile->type;
         key.country = profile->test_country;
-        key.services = serviceFilterKeys(profile->service_checks);
+        key.services = getServiceFilterKeys(profile->service_checks, cache);
         if (profile->outbound) {
             key.address = profile->outbound->server;
             key.effectiveAddress = Configs::EffectiveEndpointHost(profile);
@@ -279,7 +334,11 @@ void ProfilesTableModel::ensureFilterIndex() const {
     m_serviceNames.clear();
     m_serviceWords.clear();
     for (const auto &profile : Configs::dataManager->profilesRepo->GetProfileBatch(m_profileIds)) {
-        if (profile) insertFilterKey(profile->id, makeFilterKey(profile));
+        if (profile) {
+            insertFilterKey(profile->id, makeFilterKey(profile));
+            insertCached(profile->id, profile);
+        }
+    }
     }
 }
 
@@ -313,8 +372,7 @@ void ProfilesTableModel::refreshTable(const QList<int> &ids, int pinnedCount, bo
         // A stale order keeps its own count until the reset that replaces it.
         if (sameOrder) setPinnedCount(pinnedCount);
         m_addressCache.clear();
-        m_filterKeys.clear();
-        m_filterIndexBuilt = false;
+        // Non-destructive: preserve m_filterKeys and m_filterIndexBuilt across routine refreshes!
 
         QModelIndex topLeft = index(0, 0);
         QModelIndex bottomRight = index(m_profileIds.count() - 1, columnCount() - 1);
@@ -326,10 +384,14 @@ void ProfilesTableModel::refreshTable(const QList<int> &ids, int pinnedCount, bo
 void ProfilesTableModel::refreshProfileId(int profileId) {
     if (!id2row.contains(profileId)) return;
     m_addressCache.remove(profileId);
-    // Keep the filter key in step before dataChanged makes the proxy re-test the row.
-    if (m_filterIndexBuilt) {
-        if (auto profile = Configs::dataManager->profilesRepo->GetProfile(profileId)) {
+    auto profile = Configs::dataManager->profilesRepo->GetProfile(profileId);
+    if (profile) {
+        insertCached(profileId, profile);
+        // Keep the filter key in step before dataChanged makes the proxy re-test the row.
+        if (m_filterIndexBuilt) {
             insertFilterKey(profileId, makeFilterKey(profile));
+        }
+    }
         }
     }
     auto r = id2row.value(profileId);
@@ -340,8 +402,12 @@ void ProfilesTableModel::refreshProfileId(int profileId) {
 
 void ProfilesTableModel::invalidateAddresses() {
     m_addressCache.clear();
-    m_filterKeys.clear();
-    m_filterIndexBuilt = false;
+    for (auto it = m_filterKeys.begin(); it != m_filterKeys.end(); ++it) {
+        auto p = ensureCached(it.key());
+        if (p) {
+            it.value().effectiveAddress = Configs::EffectiveEndpointHost(p);
+        }
+    }
     if (m_profileIds.isEmpty()) return;
     emit dataChanged(index(0, ColAddress), index(static_cast<int>(m_profileIds.size()) - 1, ColAddress), {Qt::DisplayRole});
 }

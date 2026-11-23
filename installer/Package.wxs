@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:firewall="http://wixtoolset.org/schemas/v4/wxs/firewall">
+
+  <?ifndef StageDir?>
+    <?define StageDir = "stage"?>
+  <?endif?>
+
+  <Package Name="Throne"
+           Manufacturer="Throne Project"
+           Version="1.4.2.0"
+           UpgradeCode="29950A94-3C8D-4043-9E00-36AB69F78042"
+           Scope="perMachine"
+           Language="1033"
+           InstallerVersion="500">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." AllowSameVersionUpgrades="yes" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="ThroneIcon" SourceFile="Throne.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ThroneIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/throneproj/Throne" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/throneproj/Throne" />
+    <Property Id="ARPCOMMENTS" Value="Cross-platform GUI proxy utility empowered by sing-box" />
+
+    <!-- Close running processes on install/upgrade -->
+    <util:CloseApplication Id="CloseThrone" Target="Throne.exe" CloseMessage="yes" RebootPrompt="no" PromptToContinue="yes" Description="Throne is currently running and must be closed to proceed." />
+    <util:CloseApplication Id="CloseThroneCore" Target="ThroneCore.exe" CloseMessage="yes" RebootPrompt="no" PromptToContinue="yes" Description="Throne Core is currently running and must be closed to proceed." />
+
+    <!-- Directory Structure -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Throne">
+        <Directory Id="ConfigFolder" Name="config">
+          <Directory Id="DashboardFolder" Name="dashboard" />
+          <Directory Id="SbDashboardFolder" Name="sb-dashboard">
+            <Directory Id="SbAssetsFolder" Name="assets" />
+            <Directory Id="SbLicensesFolder" Name="licenses" />
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="ApplicationShortcutComponent" Guid="edc25917-8665-5412-9b42-9c9968821648">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="Throne"
+                  Description="Cross-platform GUI proxy utility"
+                  Target="[!ThroneExe]"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="ThroneIcon" />
+        <RegistryValue Root="HKCU" Key="Software\Throne" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="ApplicationDesktopShortcutComponent" Guid="7ffe3a5f-71eb-5ec7-a783-67bc13377d12">
+        <Shortcut Id="ApplicationDesktopShortcut"
+                  Name="Throne"
+                  Description="Cross-platform GUI proxy utility"
+                  Target="[!ThroneExe]"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="ThroneIcon" />
+        <RegistryValue Root="HKCU" Key="Software\Throne" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- Components -->
+    <Component Id="InstallPathRegistryComponent" Directory="INSTALLFOLDER" Guid="03c0e61c-78e1-5cb7-b3aa-ea136c309fec">
+      <RegistryKey Root="HKLM" Key="Software\Throne">
+        <RegistryValue Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        <RegistryValue Name="Version" Type="string" Value="1.4.2.0" />
+        <RegistryValue Name="Executable" Type="string" Value="[INSTALLFOLDER]Throne.exe" />
+      </RegistryKey>
+    </Component>
+
+    <!-- Folder: . (INSTALLFOLDER) -->
+    <Component Id="cmp_INSTALLFOLDER_Throne.exe" Directory="INSTALLFOLDER" Guid="7114aa2a-ab87-5ccb-82a8-66fd5c812f56">
+      <File Id="ThroneExe" Source="$(var.StageDir)\Throne.exe" KeyPath="yes">
+        <firewall:FirewallException Id="ThroneFw" Name="Throne" Scope="any" IgnoreFailure="yes" />
+      </File>
+    </Component>
+    <Component Id="cmp_INSTALLFOLDER_ThroneCore.exe" Directory="INSTALLFOLDER" Guid="01acb320-ccac-5380-a716-754c40509922">
+      <File Id="ThroneCoreExe" Source="$(var.StageDir)\ThroneCore.exe" KeyPath="yes">
+        <firewall:FirewallException Id="ThroneCoreFw" Name="Throne Core (sing-box)" Scope="any" IgnoreFailure="yes" />
+      </File>
+    </Component>
+    <Component Id="cmp_INSTALLFOLDER_libcronet.dll" Directory="INSTALLFOLDER" Guid="363a075f-d498-5233-abb0-70d0df985c22">
+      <File Id="fil_INSTALLFOLDER_libcronet.dll" Source="$(var.StageDir)\libcronet.dll" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_INSTALLFOLDER_throne_fast_core.dll" Directory="INSTALLFOLDER" Guid="804755b2-8a80-5065-8b0c-87127aec18b2">
+      <File Id="fil_INSTALLFOLDER_throne_fast_core.dll" Source="$(var.StageDir)\throne_fast_core.dll" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_INSTALLFOLDER_updater.exe" Directory="INSTALLFOLDER" Guid="4a9c192d-d701-5719-89cb-3b5ee876576d">
+      <File Id="fil_INSTALLFOLDER_updater.exe" Source="$(var.StageDir)\updater.exe" KeyPath="yes" />
+    </Component>
+
+    <!-- Folder: config\dashboard (DashboardFolder) -->
+    <Component Id="cmp_DashboardFolder_index.html" Directory="DashboardFolder" Guid="6f5424fd-0232-5f85-ad3d-ed762d7da1a8">
+      <File Id="fil_DashboardFolder_index.html" Source="$(var.StageDir)\config\dashboard\index.html" KeyPath="yes" />
+    </Component>
+
+    <!-- Folder: config\sb-dashboard (SbDashboardFolder) -->
+    <Component Id="cmp_SbDashboardFolder_apple_touch_icon_180x180.png" Directory="SbDashboardFolder" Guid="746aeb1e-12ca-5022-87d5-17e6ab79114d">
+      <File Id="fil_SbDashboardFolder_apple_touch_icon_180x180.png" Source="$(var.StageDir)\config\sb-dashboard\apple-touch-icon-180x180.png" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_favicon.ico" Directory="SbDashboardFolder" Guid="461d6ae4-9c69-57dd-aaab-c3128dbc898f">
+      <File Id="fil_SbDashboardFolder_favicon.ico" Source="$(var.StageDir)\config\sb-dashboard\favicon.ico" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_favicon.svg" Directory="SbDashboardFolder" Guid="63b38a35-ef9c-5960-bdfd-76b923acf1aa">
+      <File Id="fil_SbDashboardFolder_favicon.svg" Source="$(var.StageDir)\config\sb-dashboard\favicon.svg" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_index.html" Directory="SbDashboardFolder" Guid="ec2d007c-379a-5aae-b6ac-3fd699559a9f">
+      <File Id="fil_SbDashboardFolder_index.html" Source="$(var.StageDir)\config\sb-dashboard\index.html" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_manifest.webmanifest" Directory="SbDashboardFolder" Guid="edb57891-0b36-5de1-9422-a6fc2f2ebe98">
+      <File Id="fil_SbDashboardFolder_manifest.webmanifest" Source="$(var.StageDir)\config\sb-dashboard\manifest.webmanifest" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_maskable_icon_512x512.png" Directory="SbDashboardFolder" Guid="504380de-d1ed-507e-a781-3db7d4158ee3">
+      <File Id="fil_SbDashboardFolder_maskable_icon_512x512.png" Source="$(var.StageDir)\config\sb-dashboard\maskable-icon-512x512.png" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_pwa_192x192.png" Directory="SbDashboardFolder" Guid="3576b9f3-dfca-56cf-8bfe-74f65914556c">
+      <File Id="fil_SbDashboardFolder_pwa_192x192.png" Source="$(var.StageDir)\config\sb-dashboard\pwa-192x192.png" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_pwa_512x512.png" Directory="SbDashboardFolder" Guid="15085ef7-872b-524d-817c-49aec7dee3ae">
+      <File Id="fil_SbDashboardFolder_pwa_512x512.png" Source="$(var.StageDir)\config\sb-dashboard\pwa-512x512.png" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_pwa_64x64.png" Directory="SbDashboardFolder" Guid="0d86d018-8ac6-5b8d-b458-6ad41d4a4c06">
+      <File Id="fil_SbDashboardFolder_pwa_64x64.png" Source="$(var.StageDir)\config\sb-dashboard\pwa-64x64.png" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_registerSW.js" Directory="SbDashboardFolder" Guid="3bbc611a-94f7-5e10-8ff0-0910c9a3215f">
+      <File Id="fil_SbDashboardFolder_registerSW.js" Source="$(var.StageDir)\config\sb-dashboard\registerSW.js" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_sw.js" Directory="SbDashboardFolder" Guid="17125198-ff86-582e-8d02-d6da0b263aa8">
+      <File Id="fil_SbDashboardFolder_sw.js" Source="$(var.StageDir)\config\sb-dashboard\sw.js" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_throne.html" Directory="SbDashboardFolder" Guid="ef242123-be60-5a35-ac45-81d264a9ad9a">
+      <File Id="fil_SbDashboardFolder_throne.html" Source="$(var.StageDir)\config\sb-dashboard\throne.html" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbDashboardFolder_workbox_9c191d2f.js" Directory="SbDashboardFolder" Guid="1d1a117f-e829-511b-8baf-ac74fa45c1d6">
+      <File Id="fil_SbDashboardFolder_workbox_9c191d2f.js" Source="$(var.StageDir)\config\sb-dashboard\workbox-9c191d2f.js" KeyPath="yes" />
+    </Component>
+
+    <!-- Folder: config\sb-dashboard\assets (SbAssetsFolder) -->
+    <Component Id="cmp_SbAssetsFolder_JsonEditor_SnYjV7JI.js" Directory="SbAssetsFolder" Guid="8fb6e727-be8f-5cd6-bb3e-7c4faf67eb26">
+      <File Id="fil_SbAssetsFolder_JsonEditor_SnYjV7JI.js" Source="$(var.StageDir)\config\sb-dashboard\assets\JsonEditor-SnYjV7JI.js" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_400_normal_BSMlKf0J.wo" Directory="SbAssetsFolder" Guid="bbc24d43-f61f-5ca0-bba8-975172f7ca87">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_cyrillic_400_normal_BSMlKf0J.wo" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-cyrillic-400-normal-BSMlKf0J.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_400_normal_CEL4l2ZJ.wo" Directory="SbAssetsFolder" Guid="68662a2e-85dc-56c9-b2c4-4576c8982293">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_cyrillic_400_normal_CEL4l2ZJ.wo" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-cyrillic-400-normal-CEL4l2ZJ.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_500_normal_Ael50iVv.wo" Directory="SbAssetsFolder" Guid="fa34339b-90b1-5c0b-b199-e26848d68a99">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_cyrillic_500_normal_Ael50iVv.wo" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-cyrillic-500-normal-Ael50iVv.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_500_normal_Bq9vWWag.wo" Directory="SbAssetsFolder" Guid="96a51aec-c6c1-5dba-86df-9821f1cbac15">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_cyrillic_500_normal_Bq9vWWag.wo" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-cyrillic-500-normal-Bq9vWWag.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_400_normal_DMdlQ8K" Directory="SbAssetsFolder" Guid="15265fcd-6dc3-57f8-b8c1-1b1240f53082">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_400_normal_DMdlQ8K" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-cyrillic-ext-400-normal-DMdlQ8Kv.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_400_normal_xuaO2J_" Directory="SbAssetsFolder" Guid="59cc44aa-3928-5893-aa43-9c9d7f3c2b65">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_400_normal_xuaO2J_" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-cyrillic-ext-400-normal-xuaO2J-f.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_500_normal_BIfNGwU" Directory="SbAssetsFolder" Guid="ba11f02b-a6d9-572c-baf3-b5e7f1a8c5c4">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_500_normal_BIfNGwU" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-cyrillic-ext-500-normal-BIfNGwUT.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_500_normal_BqneJy0" Directory="SbAssetsFolder" Guid="34fef10d-4243-58af-b0f6-44d8bf05880d">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_500_normal_BqneJy0" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-cyrillic-ext-500-normal-BqneJy0T.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_400_normal_CvHOgSBP.woff" Directory="SbAssetsFolder" Guid="aec4515d-73a8-55cb-aeb5-3999e8f00966">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_latin_400_normal_CvHOgSBP.woff" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-latin-400-normal-CvHOgSBP.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_400_normal_DMJ8VG8y.woff2" Directory="SbAssetsFolder" Guid="ca32d40a-195e-5743-840b-6203f1d367ce">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_latin_400_normal_DMJ8VG8y.woff2" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-latin-400-normal-DMJ8VG8y.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_500_normal_CB9ihrfo.woff" Directory="SbAssetsFolder" Guid="6af327dc-4155-5f04-94ff-4f5118174ba1">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_latin_500_normal_CB9ihrfo.woff" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-latin-500-normal-CB9ihrfo.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_500_normal_DSY6xOcd.woff2" Directory="SbAssetsFolder" Guid="eeee5748-b10a-5329-b75a-8c830d8c26a8">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_latin_500_normal_DSY6xOcd.woff2" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-latin-500-normal-DSY6xOcd.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_ext_400_normal_BmRBH3aV.w" Directory="SbAssetsFolder" Guid="170d763d-bfe8-5e03-ab7d-551882b32cd1">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_latin_ext_400_normal_BmRBH3aV.w" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-latin-ext-400-normal-BmRBH3aV.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_ext_400_normal_D3D2R8hC.w" Directory="SbAssetsFolder" Guid="18192dfe-0d76-5779-a1dd-886ff4d5bf82">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_latin_ext_400_normal_D3D2R8hC.w" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-latin-ext-400-normal-D3D2R8hC.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_ext_500_normal_CAhNIIs5.w" Directory="SbAssetsFolder" Guid="2ce46ed7-c18c-51e7-8b8d-7926e23acac6">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_latin_ext_500_normal_CAhNIIs5.w" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-latin-ext-500-normal-CAhNIIs5.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_ext_500_normal_CZ70TYgx.w" Directory="SbAssetsFolder" Guid="9cde93ab-2625-5a99-b23a-9ca10f82ff48">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_latin_ext_500_normal_CZ70TYgx.w" Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-latin-ext-500-normal-CZ70TYgx.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_vietnamese_400_normal_BulugwFq." Directory="SbAssetsFolder" Guid="c528db99-4a97-54a7-994a-34116e57a261">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_vietnamese_400_normal_BulugwFq." Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-vietnamese-400-normal-BulugwFq.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_vietnamese_400_normal_DDuiU_S_." Directory="SbAssetsFolder" Guid="1167d6a8-aa7e-5548-a93e-d905b53ace90">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_vietnamese_400_normal_DDuiU_S_." Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-vietnamese-400-normal-DDuiU_S-.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_vietnamese_500_normal_C8zxqsMH." Directory="SbAssetsFolder" Guid="5c9580ab-5c86-5afe-9735-566c9ec32a2e">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_vietnamese_500_normal_C8zxqsMH." Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-vietnamese-500-normal-C8zxqsMH.woff" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_ibm_plex_mono_vietnamese_500_normal_DZ4AoWbu." Directory="SbAssetsFolder" Guid="ca891d15-672d-5886-8062-aa9313b109fb">
+      <File Id="fil_SbAssetsFolder_ibm_plex_mono_vietnamese_500_normal_DZ4AoWbu." Source="$(var.StageDir)\config\sb-dashboard\assets\ibm-plex-mono-vietnamese-500-normal-DZ4AoWbu.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_index_CvdWH0XG.js" Directory="SbAssetsFolder" Guid="776db1a9-4484-52bb-b80d-23481ee974d1">
+      <File Id="fil_SbAssetsFolder_index_CvdWH0XG.js" Source="$(var.StageDir)\config\sb-dashboard\assets\index-CvdWH0XG.js" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_index_DSWRtvWp.css" Directory="SbAssetsFolder" Guid="acdd3719-1f50-54a2-98d1-f7c92ce2d94c">
+      <File Id="fil_SbAssetsFolder_index_DSWRtvWp.css" Source="$(var.StageDir)\config\sb-dashboard\assets\index-DSWRtvWp.css" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_noto_color_emoji_emoji_400_normal_BnQPWYVz.wo" Directory="SbAssetsFolder" Guid="efcef091-a99f-5eb2-921b-c2d8989c6ca9">
+      <File Id="fil_SbAssetsFolder_noto_color_emoji_emoji_400_normal_BnQPWYVz.wo" Source="$(var.StageDir)\config\sb-dashboard\assets\noto-color-emoji-emoji-400-normal-BnQPWYVz.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_schibsted_grotesk_latin_ext_wght_normal_hsMS0" Directory="SbAssetsFolder" Guid="feeb32b4-2246-5780-91b2-ec822f785056">
+      <File Id="fil_SbAssetsFolder_schibsted_grotesk_latin_ext_wght_normal_hsMS0" Source="$(var.StageDir)\config\sb-dashboard\assets\schibsted-grotesk-latin-ext-wght-normal-hsMS0n0O.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_schibsted_grotesk_latin_wght_normal_Bb8VGrTG." Directory="SbAssetsFolder" Guid="85725411-8713-52c1-83c5-74f6ab0735e1">
+      <File Id="fil_SbAssetsFolder_schibsted_grotesk_latin_wght_normal_Bb8VGrTG." Source="$(var.StageDir)\config\sb-dashboard\assets\schibsted-grotesk-latin-wght-normal-Bb8VGrTG.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_source_serif_4_cyrillic_ext_wght_normal_cHuGM" Directory="SbAssetsFolder" Guid="3a68f7e2-615d-555e-b42b-5dbb92fe4b32">
+      <File Id="fil_SbAssetsFolder_source_serif_4_cyrillic_ext_wght_normal_cHuGM" Source="$(var.StageDir)\config\sb-dashboard\assets\source-serif-4-cyrillic-ext-wght-normal-cHuGMAiY.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_source_serif_4_cyrillic_wght_normal_DwHjdM4S." Directory="SbAssetsFolder" Guid="b6c7730f-7715-5a0e-a732-1f366fe63556">
+      <File Id="fil_SbAssetsFolder_source_serif_4_cyrillic_wght_normal_DwHjdM4S." Source="$(var.StageDir)\config\sb-dashboard\assets\source-serif-4-cyrillic-wght-normal-DwHjdM4S.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_source_serif_4_greek_wght_normal_ece1310W.wof" Directory="SbAssetsFolder" Guid="4de06965-7dac-57d6-aa3a-8ee8bbfe661f">
+      <File Id="fil_SbAssetsFolder_source_serif_4_greek_wght_normal_ece1310W.wof" Source="$(var.StageDir)\config\sb-dashboard\assets\source-serif-4-greek-wght-normal-ece1310W.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_source_serif_4_latin_ext_wght_normal_CxNHBx_q" Directory="SbAssetsFolder" Guid="be2d7d6d-bf83-55d5-8ecb-2a7d2d4af2cb">
+      <File Id="fil_SbAssetsFolder_source_serif_4_latin_ext_wght_normal_CxNHBx_q" Source="$(var.StageDir)\config\sb-dashboard\assets\source-serif-4-latin-ext-wght-normal-CxNHBx-q.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_source_serif_4_latin_wght_normal_D9elroTD.wof" Directory="SbAssetsFolder" Guid="6de1d2f3-eea1-5508-9eeb-22972fc37c3a">
+      <File Id="fil_SbAssetsFolder_source_serif_4_latin_wght_normal_D9elroTD.wof" Source="$(var.StageDir)\config\sb-dashboard\assets\source-serif-4-latin-wght-normal-D9elroTD.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_source_serif_4_vietnamese_wght_normal_D_yuW59" Directory="SbAssetsFolder" Guid="395ce9fa-40fa-53fb-963d-ca14746ce94d">
+      <File Id="fil_SbAssetsFolder_source_serif_4_vietnamese_wght_normal_D_yuW59" Source="$(var.StageDir)\config\sb-dashboard\assets\source-serif-4-vietnamese-wght-normal-D-yuW59g.woff2" KeyPath="yes" />
+    </Component>
+    <Component Id="cmp_SbAssetsFolder_terminalThemes_D55_FX1d.js" Directory="SbAssetsFolder" Guid="e9e6df9c-9201-5c23-873e-0e179c4d9533">
+      <File Id="fil_SbAssetsFolder_terminalThemes_D55_FX1d.js" Source="$(var.StageDir)\config\sb-dashboard\assets\terminalThemes-D55_FX1d.js" KeyPath="yes" />
+    </Component>
+
+    <!-- Folder: config\sb-dashboard\licenses (SbLicensesFolder) -->
+    <Component Id="cmp_SbLicensesFolder_NotoColorEmoji_OFL.txt" Directory="SbLicensesFolder" Guid="e88a97e3-a0f2-59ec-bf7e-c5c2d7e50604">
+      <File Id="fil_SbLicensesFolder_NotoColorEmoji_OFL.txt" Source="$(var.StageDir)\config\sb-dashboard\licenses\NotoColorEmoji-OFL.txt" KeyPath="yes" />
+    </Component>
+
+    <!-- Features -->
+    <Feature Id="MainFeature" Title="Throne Application" Level="1" Display="expand" ConfigurableDirectory="INSTALLFOLDER">
+      <ComponentRef Id="ApplicationShortcutComponent" />
+      <ComponentRef Id="ApplicationDesktopShortcutComponent" />
+      <ComponentRef Id="InstallPathRegistryComponent" />
+      <ComponentRef Id="cmp_INSTALLFOLDER_Throne.exe" />
+      <ComponentRef Id="cmp_INSTALLFOLDER_ThroneCore.exe" />
+      <ComponentRef Id="cmp_INSTALLFOLDER_libcronet.dll" />
+      <ComponentRef Id="cmp_INSTALLFOLDER_throne_fast_core.dll" />
+      <ComponentRef Id="cmp_INSTALLFOLDER_updater.exe" />
+      <ComponentRef Id="cmp_DashboardFolder_index.html" />
+      <ComponentRef Id="cmp_SbDashboardFolder_apple_touch_icon_180x180.png" />
+      <ComponentRef Id="cmp_SbDashboardFolder_favicon.ico" />
+      <ComponentRef Id="cmp_SbDashboardFolder_favicon.svg" />
+      <ComponentRef Id="cmp_SbDashboardFolder_index.html" />
+      <ComponentRef Id="cmp_SbDashboardFolder_manifest.webmanifest" />
+      <ComponentRef Id="cmp_SbDashboardFolder_maskable_icon_512x512.png" />
+      <ComponentRef Id="cmp_SbDashboardFolder_pwa_192x192.png" />
+      <ComponentRef Id="cmp_SbDashboardFolder_pwa_512x512.png" />
+      <ComponentRef Id="cmp_SbDashboardFolder_pwa_64x64.png" />
+      <ComponentRef Id="cmp_SbDashboardFolder_registerSW.js" />
+      <ComponentRef Id="cmp_SbDashboardFolder_sw.js" />
+      <ComponentRef Id="cmp_SbDashboardFolder_throne.html" />
+      <ComponentRef Id="cmp_SbDashboardFolder_workbox_9c191d2f.js" />
+      <ComponentRef Id="cmp_SbAssetsFolder_JsonEditor_SnYjV7JI.js" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_400_normal_BSMlKf0J.wo" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_400_normal_CEL4l2ZJ.wo" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_500_normal_Ael50iVv.wo" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_500_normal_Bq9vWWag.wo" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_400_normal_DMdlQ8K" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_400_normal_xuaO2J_" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_500_normal_BIfNGwU" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_cyrillic_ext_500_normal_BqneJy0" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_400_normal_CvHOgSBP.woff" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_400_normal_DMJ8VG8y.woff2" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_500_normal_CB9ihrfo.woff" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_500_normal_DSY6xOcd.woff2" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_ext_400_normal_BmRBH3aV.w" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_ext_400_normal_D3D2R8hC.w" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_ext_500_normal_CAhNIIs5.w" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_latin_ext_500_normal_CZ70TYgx.w" />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_vietnamese_400_normal_BulugwFq." />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_vietnamese_400_normal_DDuiU_S_." />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_vietnamese_500_normal_C8zxqsMH." />
+      <ComponentRef Id="cmp_SbAssetsFolder_ibm_plex_mono_vietnamese_500_normal_DZ4AoWbu." />
+      <ComponentRef Id="cmp_SbAssetsFolder_index_CvdWH0XG.js" />
+      <ComponentRef Id="cmp_SbAssetsFolder_index_DSWRtvWp.css" />
+      <ComponentRef Id="cmp_SbAssetsFolder_noto_color_emoji_emoji_400_normal_BnQPWYVz.wo" />
+      <ComponentRef Id="cmp_SbAssetsFolder_schibsted_grotesk_latin_ext_wght_normal_hsMS0" />
+      <ComponentRef Id="cmp_SbAssetsFolder_schibsted_grotesk_latin_wght_normal_Bb8VGrTG." />
+      <ComponentRef Id="cmp_SbAssetsFolder_source_serif_4_cyrillic_ext_wght_normal_cHuGM" />
+      <ComponentRef Id="cmp_SbAssetsFolder_source_serif_4_cyrillic_wght_normal_DwHjdM4S." />
+      <ComponentRef Id="cmp_SbAssetsFolder_source_serif_4_greek_wght_normal_ece1310W.wof" />
+      <ComponentRef Id="cmp_SbAssetsFolder_source_serif_4_latin_ext_wght_normal_CxNHBx_q" />
+      <ComponentRef Id="cmp_SbAssetsFolder_source_serif_4_latin_wght_normal_D9elroTD.wof" />
+      <ComponentRef Id="cmp_SbAssetsFolder_source_serif_4_vietnamese_wght_normal_D_yuW59" />
+      <ComponentRef Id="cmp_SbAssetsFolder_terminalThemes_D55_FX1d.js" />
+      <ComponentRef Id="cmp_SbLicensesFolder_NotoColorEmoji_OFL.txt" />
+    </Feature>
+
+    <!-- Setup UI -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+    <!-- Launch on Exit -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Throne now" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[#ThroneExe]" />
+    <CustomAction Id="LaunchApplication" DllEntry="WixShellExec" Impersonate="yes" BinaryRef="Wix4UtilCA_X64" />
+
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+
+  </Package>
+</Wix>
