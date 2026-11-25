@@ -14,6 +14,7 @@
 
 #include "NkrVersion.h"
 #include "include/global/Configs.hpp"
+#include "include/throne_fast_core.h"
 
 DialogAbout::DialogAbout(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("About Throne"));
@@ -48,6 +49,9 @@ DialogAbout::DialogAbout(QWidget *parent) : QDialog(parent) {
     versions->addRow(QStringLiteral("Xray-core:"), xrayVersion);
     versions->addRow(QStringLiteral("Qt:"), valueLabel(QString::fromLatin1(qVersion())));
     versions->addRow(QStringLiteral("Go:"), goVersion);
+#ifdef THRONE_HAS_FAST_CORE
+    versions->addRow(QStringLiteral("Rust Core:"), valueLabel(QString::fromUtf8(throne_fast_version_string())));
+#endif
 
     auto *description = new QLabel(tr("Open-source and cross platform Desktop Proxy management utility developed as a successor to Nekoray."), this);
     description->setWordWrap(true);
@@ -64,7 +68,12 @@ DialogAbout::DialogAbout(QWidget *parent) : QDialog(parent) {
     top->addWidget(icon);
     top->addLayout(text, 1);
 
-    auto *github = new QPushButton(QStringLiteral("GitHub"), this);
+    auto *rustGithub = new QPushButton(QStringLiteral("Throne-Rust"), this);
+    rustGithub->setAutoDefault(false);
+    connect(rustGithub, &QPushButton::clicked, this, [] {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/IMAN-Py/Throne-Rust")));
+    });
+    auto *github = new QPushButton(QStringLiteral("Upstream GitHub"), this);
     github->setAutoDefault(false);
     connect(github, &QPushButton::clicked, this, [] {
         QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/throneproj/Throne")));
@@ -77,6 +86,7 @@ DialogAbout::DialogAbout(QWidget *parent) : QDialog(parent) {
 
     auto *buttons = new QHBoxLayout;
     buttons->addStretch();
+    buttons->addWidget(rustGithub);
     buttons->addWidget(github);
     buttons->addWidget(support);
     buttons->addStretch();

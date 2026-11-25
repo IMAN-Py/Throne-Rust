@@ -37,6 +37,7 @@ endif ()
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network LinguistTools ${QT_DBUS_COMPONENT})
 
 include("cmake/nkr.cmake")
+include("cmake/throne_fast_core.cmake")
 
 #### Platform Variables ####
 if (APPLE)
@@ -969,5 +970,9 @@ target_link_libraries(Throne PRIVATE
         ${NKR_EXTERNAL_TARGETS}
         ${PLATFORM_LIBRARIES}
 )
+
+if(ENABLE_THRONE_FAST_CORE)
+    throne_link_fast_core(Throne)
+endif()
 
 qt_finalize_executable(Throne)

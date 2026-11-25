@@ -1,5 +1,6 @@
 #include "include/configs/sub/GroupUpdater.hpp"
 
+#include "include/throne_fast_core.h"
 #include "include/configs/generate.h"
 #include "include/configs/sub/ImportReport.hpp"
 #include "include/configs/sub/RouteUpdater.hpp"
@@ -36,7 +37,12 @@ namespace Subscription {
         constexpr int kValidityCheckThreads = 10;
 
         QByteArray digest(const QByteArray &data) {
-            return QCryptographicHash::hash(data, QCryptographicHash::Sha256);
+            QByteArray out(32, Qt::Uninitialized);
+            throne_fast_sha256_raw(
+                reinterpret_cast<const uint8_t*>(data.constData()),
+                static_cast<size_t>(data.size()),
+                reinterpret_cast<uint8_t*>(out.data()));
+            return out;
         }
 
         QByteArray contentKeyOf(const Configs::Profile &ent) {

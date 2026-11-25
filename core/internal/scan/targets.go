@@ -46,19 +46,21 @@ const (
 )
 
 type targetRange struct {
-	base     netip.Addr
-	hostBits int
-	sampled  bool
-	ports    []uint16
-	start    uint64
-	sampler  mixer
-	highKey  uint64
+	base       netip.Addr
+	hostBits   int
+	sampled    bool
+	ports      []uint16
+	start      uint64
+	sampler    mixer
+	samplerKey uint64
+	highKey    uint64
 }
 
 type Targets struct {
 	ranges  []targetRange
 	total   uint64
 	shuffle bool
+	seed    uint64
 	order   mixer
 
 	SampledEntries int
@@ -66,7 +68,7 @@ type Targets struct {
 }
 
 func NewTargets(spec Spec) *Targets {
-	t := &Targets{shuffle: spec.Shuffle}
+	t := &Targets{shuffle: spec.Shuffle, seed: spec.Seed}
 	defaultPorts := normalizePorts(spec.DefaultPorts)
 	var limit uint64
 	if spec.MaxHostsPerEntry > 0 {
@@ -110,6 +112,7 @@ func NewTargets(spec Spec) *Targets {
 		if sampled {
 			t.SampledEntries++
 			key := spec.Seed ^ prefixHash(prefix)
+			r.samplerKey = key
 			r.sampler = newMixer(min(hostBits, 64), key)
 			r.highKey = splitmix64(&key)
 		}

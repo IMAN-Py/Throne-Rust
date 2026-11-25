@@ -70,28 +70,55 @@ QMimeData* ProfilesTableModel::mimeData(const QModelIndexList &indexes) const {
 
 void ProfilesTableModel::ensureCached(int profileId) const {
     if (m_cache.contains(profileId)) {
-        for (int i = 0; i < m_lruOrder.size(); ++i) {
-            if (m_lruOrder[i] == profileId) {
-                m_lruOrder.move(i, m_lruOrder.size() - 1);
-                break;
-            }
+        auto it = m_lruPos.constFind(profileId);
+        if (it != m_lruPos.constEnd()) {
+            m_lruOrder.splice(m_lruOrder.end(), m_lruOrder, *it);
         }
         return;
     }
 
+    const auto insertEntry = [this](int id, const std::shared_ptr<Configs::Profile> &p) {
+        if (!p || m_cache.contains(id)) return;
+        while (m_cache.size() >= m_cacheSize && !m_lruOrder.empty()) {
+            evictOne();
+        }
+        m_cache[id] = p;
+        m_lruOrder.push_back(id);
+        m_lruPos[id] = std::prev(m_lruOrder.end());
+    };
+
+    const int row = id2row.value(profileId, -1);
+    if (row >= 0 && !m_profileIds.isEmpty()) {
+        const int total = static_cast<int>(m_profileIds.size());
+        const int beginRow = qMax(0, row - 8);
+        const int endRow = qMin(total - 1, row + 32);
+        QList<int> toFetch;
+        toFetch.reserve(endRow - beginRow + 1);
+        for (int r = beginRow; r <= endRow; ++r) {
+            const int pid = m_profileIds[r];
+            if (!m_cache.contains(pid)) {
+                toFetch.append(pid);
+            }
+        }
+        if (!toFetch.isEmpty()) {
+            const auto batch = Configs::dataManager->profilesRepo->GetProfileBatch(toFetch);
+            for (const auto &p : batch) {
+                if (p) insertEntry(p->id, p);
+            }
+        }
+        if (m_cache.contains(profileId)) return;
+    }
+
     auto profile = Configs::dataManager->profilesRepo->GetProfile(profileId);
     if (!profile) return;
-
-    while (m_cache.size() >= m_cacheSize && !m_lruOrder.isEmpty()) {
-        evictOne();
-    }
-    m_cache[profileId] = profile;
-    m_lruOrder.append(profileId);
+    insertEntry(profileId, profile);
 }
 
 void ProfilesTableModel::evictOne() const {
-    if (m_lruOrder.isEmpty()) return;
-    int id = m_lruOrder.takeFirst();
+    if (m_lruOrder.empty()) return;
+    int id = m_lruOrder.front();
+    m_lruOrder.pop_front();
+    m_lruPos.remove(id);
     m_cache.remove(id);
     m_addressCache.remove(id);
 }
@@ -209,12 +236,14 @@ void ProfilesTableModel::setProfileIds(const QList<int> &ids, int pinnedCount) {
     m_profileIds = ids;
     m_pinnedCount = std::clamp(pinnedCount, 0, static_cast<int>(ids.size()));
     id2row.clear();
+    id2row.reserve(ids.size());
     int idx=0;
     for (const auto &id : ids) {
         id2row.insert(id, idx++);
     }
     m_cache.clear();
     m_lruOrder.clear();
+    m_lruPos.clear();
     m_addressCache.clear();
     m_filterKeys.clear();
     m_filterIndexBuilt = false;

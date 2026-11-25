@@ -24,6 +24,7 @@ type ruleMatchCache struct {
 	entries map[adapter.Rule][]rulematch.Entry
 	conns   map[uuid.UUID]string
 	seen    map[uuid.UUID]string
+	active  bool
 }
 
 // reset ties the cache to box and the route rules its router was built from; a nil box lets a stopped one go.
@@ -32,6 +33,7 @@ func (m *ruleMatchCache) reset(box *boxmain.Box, rules []option.Rule) {
 	defer m.mu.Unlock()
 	m.box, m.rules = box, rules
 	m.entries, m.conns = make(map[adapter.Rule][]rulematch.Entry), make(map[uuid.UUID]string)
+	m.seen, m.active = nil, false
 }
 
 // routeRules gives the route rules box was built from, aligned with its router's; nil once another box replaced it.
@@ -49,13 +51,19 @@ func (m *ruleMatchCache) begin(box *boxmain.Box) {
 	m.mu.Lock()
 	// A poll that read the box just before a restart replaced it has no rules to match against.
 	if box != m.box {
+		m.active = false
 		return
 	}
-	m.seen = make(map[uuid.UUID]string, len(m.conns))
+	if m.seen == nil {
+		m.seen = make(map[uuid.UUID]string, len(m.conns))
+	} else {
+		clear(m.seen)
+	}
+	m.active = true
 }
 
 func (m *ruleMatchCache) matched(c *trafficcontrol.TrackerMetadata) string {
-	if c.Rule == nil || m.seen == nil {
+	if c.Rule == nil || !m.active {
 		return ""
 	}
 	item, cached := m.conns[c.ID]
@@ -76,8 +84,10 @@ func (m *ruleMatchCache) matched(c *trafficcontrol.TrackerMetadata) string {
 
 // end keeps only the connections this poll reported, so the ones gone from the closed ring do not pile up.
 func (m *ruleMatchCache) end() {
-	if m.seen != nil {
-		m.conns, m.seen = m.seen, nil
+	if m.active {
+		m.conns, m.seen = m.seen, m.conns
+		clear(m.seen)
+		m.active = false
 	}
 	m.mu.Unlock()
 }

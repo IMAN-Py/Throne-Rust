@@ -1,0 +1,60 @@
+name: Rust Acceleration Core & Differential CI
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - 'throne_fast_core/**'
+      - 'include/throne_fast_core.h'
+      - 'cmake/throne_fast_core.cmake'
+      - 'tests/**'
+      - 'core/**'
+      - 'installer/**'
+      - '.github/workflows/rust-core.yml'
+  pull_request:
+    branches: [ main, dev ]
+  workflow_dispatch:
+
+jobs:
+  rust-go-cpp-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build and test Rust crate (throne_fast_core)
+        shell: pwsh
+        run: |
+          cd throne_fast_core
+          cargo test --release -- --nocapture
+          cargo build --release
+
+      - name: Run C++20 <-> Rust differential & benchmark suite
+        shell: pwsh
+        run: |
+          $dll = "$PWD\throne_fast_core\target\release\throne_fast_core.dll"
+          $lib = "$PWD\throne_fast_core\target\release\throne_fast_core.dll.lib"
+          New-Item -ItemType Directory -Force tests\bin | Out-Null
+          Copy-Item $dll tests\bin\throne_fast_core.dll -Force
+          cl.exe /nologo /std:c++20 /O2 /EHsc /Iinclude tests\cpp_fast_core_test.cpp /Fe:tests\bin\cpp_fast_core_test.exe /link $lib
+          .\tests\bin\cpp_fast_core_test.exe
+
+      - name: Run Go unit & differential tests against throne_fast_core.dll
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = "0"
+          $env:THRONE_FAST_CORE_DLL = "$PWD\throne_fast_core\target\release\throne_fast_core.dll"
+          cd core
+          go test -count=1 -v ./internal/fastcore ./internal/probe ./internal/rpc ./internal/scan
+
+      - name: Engine/UI boundary check
+        shell: pwsh
+        run: |
+          cmake -DROOT="$PWD" -P cmake/EngineBoundary.cmake

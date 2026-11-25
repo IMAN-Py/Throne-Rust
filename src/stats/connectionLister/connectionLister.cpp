@@ -9,8 +9,11 @@
 #include <include/stats/connections/connectionLister.hpp>
 #include "include/stats/traffic/TrafficStatsManager.hpp"
 #include "include/global/LocalNetwork.hpp"
+#include "include/throne_fast_core.h"
 
 #include <algorithm>
+#include <string_view>
+#include <unordered_map>
 
 
 
@@ -99,27 +102,61 @@ namespace Stats
         outboundNames_ = names;
     }
 
+    namespace
+    {
+        struct ConnInternKey
+        {
+            uint64_t hash;
+            std::string_view sv;
+            bool operator==(const ConnInternKey& o) const noexcept { return hash == o.hash && sv == o.sv; }
+        };
+
+        struct ConnInternHash
+        {
+            size_t operator()(const ConnInternKey& k) const noexcept { return static_cast<size_t>(k.hash); }
+        };
+
+        using ConnInternMap = std::unordered_map<ConnInternKey, QString, ConnInternHash>;
+
+        inline QString fastIntern(ConnInternMap& pool, const std::string& s)
+        {
+            if (s.empty()) return {};
+            const std::string_view sv(s);
+            const uint64_t h = throne_fast_xxhash64(
+                reinterpret_cast<const uint8_t*>(sv.data()), sv.size(), 0);
+            const ConnInternKey key{h, sv};
+            if (const auto it = pool.find(key); it != pool.end()) {
+                return it->second;
+            }
+            QString decoded = QString::fromUtf8(sv.data(), static_cast<qsizetype>(sv.size()));
+            pool.emplace(key, decoded);
+            return decoded;
+        }
+    }
+
     static ConnectionMetadata metaFromProto(const libcore::ConnectionMetaData& conn, const QString& localLabel,
-                                            const QHash<QString, QString>& outboundNames)
+                                            const QHash<QString, QString>& outboundNames, ConnInternMap& intern)
     {
         ConnectionMetadata c;
-        c.id = QString::fromStdString(conn.id.value());
+        const auto& idStr = conn.id.value();
+        c.id = QString::fromUtf8(idStr.data(), static_cast<qsizetype>(idStr.size()));
         c.createdAtMs = conn.created_at.value();
-        c.dest = QString::fromStdString(conn.dest.value());
+        const auto& destStr = conn.dest.value();
+        c.dest = QString::fromUtf8(destStr.data(), static_cast<qsizetype>(destStr.size()));
         c.upload = conn.upload.value();
         c.download = conn.download.value();
-        c.domain = QString::fromStdString(conn.domain.value());
-        c.network = QString::fromStdString(conn.network.value());
-        c.outbound = QString::fromStdString(conn.outbound.value());
+        c.domain = fastIntern(intern, conn.domain.value());
+        c.network = fastIntern(intern, conn.network.value());
+        c.outbound = fastIntern(intern, conn.outbound.value());
         c.outboundName = outboundNames.value(c.outbound);
         if (c.outboundName.isEmpty()) c.outboundName = c.outbound;
-        c.process = QString::fromStdString(conn.process.value());
-        c.processPath = QString::fromStdString(conn.process_path.value());
-        c.protocol = QString::fromStdString(conn.protocol.value());
+        c.process = fastIntern(intern, conn.process.value());
+        c.processPath = fastIntern(intern, conn.process_path.value());
+        c.protocol = fastIntern(intern, conn.protocol.value());
         c.closedAtMs = conn.closed_at.value();
-        c.rule = QString::fromStdString(conn.rule.value());
-        c.ruleItem = QString::fromStdString(conn.rule_item.value());
-        c.source = QString::fromStdString(conn.source.value());
+        c.rule = fastIntern(intern, conn.rule.value());
+        c.ruleItem = fastIntern(intern, conn.rule_item.value());
+        c.source = fastIntern(intern, conn.source.value());
         // In tun mode our own traffic enters with the tun's (or this machine's LAN) address, so a loopback-only test would label it a LAN client.
         const QString host = EndpointHost(c.source);
         c.sourceLocal = host.isEmpty() || LocalNetwork::IsOwnAddress(host);
@@ -193,6 +230,9 @@ namespace Stats
             outboundNames = outboundNames_;
         }
 
+        ConnInternMap intern;
+        intern.reserve(64);
+
         QList<ConnectionMetadata> rows;
         rows.reserve(static_cast<qsizetype>(resp.active.size()));
         QHash<QString, SpeedSample> newSamples;
@@ -200,7 +240,7 @@ namespace Stats
 
         for (const auto& conn : resp.active)
         {
-            auto c = metaFromProto(conn, localLabel, outboundNames);
+            auto c = metaFromProto(conn, localLabel, outboundNames, intern);
 
             SpeedSample s;
             if (const auto it = speedSamples_.constFind(c.id); it != speedSamples_.constEnd())
@@ -235,15 +275,17 @@ namespace Stats
 
             rows.append(std::move(c));
         }
-        speedSamples_ = newSamples; // drop ids for connections that have closed
+        speedSamples_ = std::move(newSamples); // drop ids for connections that have closed
 
         // Credits the live set plus the recently-closed ring (deduped by id), so a connection that opened and closed between polls still counts.
         QHash<QString, QPair<qint64, qint64>> newLast;
+        newLast.reserve(rows.size());
         QSet<QString> currentClosed;
+        currentClosed.reserve(static_cast<qsizetype>(resp.closed.size()));
 
-        auto credit = [&](const libcore::ConnectionMetaData& cm, qint64 curUp, qint64 curDown)
+        auto credit = [&](const QString& id, const QString& process, const QString& processPath,
+                          qint64 curUp, qint64 curDown)
         {
-            const QString id = QString::fromStdString(cm.id.value());
             qint64 baseUp = 0, baseDown = 0;
             if (const auto it = lastBytes_.constFind(id); it != lastBytes_.constEnd())
             {
@@ -255,27 +297,28 @@ namespace Stats
             if (dUp < 0) dUp = 0;
             if (dDown < 0) dDown = 0;
             if (dUp == 0 && dDown == 0) return;
-            QString name = QString::fromStdString(cm.process.value());
-            if (name.isEmpty()) name = "Unknown";
-            trafficStatsManager->AddAppDelta(name, QString::fromStdString(cm.process_path.value()), dUp, dDown);
+            trafficStatsManager->AddAppDelta(process.isEmpty() ? QStringLiteral("Unknown") : process,
+                                             processPath, dUp, dDown);
         };
 
-        for (const auto& cm : resp.active)
+        for (qsizetype idx = 0; idx < rows.size(); ++idx)
         {
-            const qint64 up = cm.upload.value();
-            const qint64 down = cm.download.value();
-            credit(cm, up, down);
-            newLast.insert(QString::fromStdString(cm.id.value()), {up, down});
+            const auto& row = rows[idx];
+            credit(row.id, row.process, row.processPath, row.upload, row.download);
+            newLast.insert(row.id, {row.upload, row.download});
         }
         for (const auto& cm : resp.closed)
         {
-            const QString id = QString::fromStdString(cm.id.value());
+            const auto& idStr = cm.id.value();
+            const QString id = QString::fromUtf8(idStr.data(), static_cast<qsizetype>(idStr.size()));
             currentClosed.insert(id);
             if (accountedClosed_.contains(id)) continue;
-            credit(cm, cm.upload.value(), cm.download.value());
+            credit(id, fastIntern(intern, cm.process.value()),
+                   fastIntern(intern, cm.process_path.value()),
+                   cm.upload.value(), cm.download.value());
         }
-        lastBytes_ = newLast;             // drop evicted / now-closed live ids
-        accountedClosed_ = currentClosed; // everything in the ring is accounted
+        lastBytes_ = std::move(newLast);             // drop evicted / now-closed live ids
+        accountedClosed_ = std::move(currentClosed); // everything in the ring is accounted
 
         if (pushToApi)
         {
@@ -285,9 +328,9 @@ namespace Stats
             for (const auto& row : rows) openIds.insert(row.id);
             for (const auto& conn : resp.closed)
             {
-                auto c = metaFromProto(conn, localLabel, outboundNames);
-                // A connection that closed while the core listed it shows up in both lists.
-                if (!openIds.contains(c.id)) apiRows.append(std::move(c));
+                const auto& cid = conn.id.value();
+                if (openIds.contains(QString::fromUtf8(cid.data(), static_cast<qsizetype>(cid.size())))) continue;
+                apiRows.append(metaFromProto(conn, localLabel, outboundNames, intern));
             }
             sortApiSnapshot(apiRows);
             if (apiRows.size() > kSnapshotMaxRows) apiRows.resize(kSnapshotMaxRows);

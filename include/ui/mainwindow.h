@@ -317,6 +317,8 @@ private:
     class RuntimeStatsWidget *runtimeStatsWidget = nullptr;
     std::atomic<qint64> lastUpdatedMs = QDateTime::currentMSecsSinceEpoch();
     DataViewHtmlGenerator dataViewHtmlGenerator_;
+    uint64_t m_lastDataViewHtmlHash = 0;
+    uint64_t m_lastDataViewTipHash = 0;
 
     QList<QShortcut*> hiddenMenuShortcuts;
     GlobalHotkeys *globalHotkeys = nullptr;

@@ -117,6 +117,13 @@ func Probe(ctx context.Context, session *Session, egress Egress, req ProbeReques
 	start := req.Cursor
 	count := int(min(uint64(min(req.MaxTargets, maxChunkTargets)), total-start))
 
+	fastTargets := targets.NewFastBatch(count)
+	defer fastTargets.Close()
+	batchTargets := make([]Target, count)
+	if count > 0 {
+		fastTargets.FillBatch(start, batchTargets)
+	}
+
 	plan, err := newProbePlan(ctx, req)
 	if err != nil {
 		return response, err
@@ -124,7 +131,7 @@ func Probe(ctx context.Context, session *Session, egress Egress, req ProbeReques
 	if !plan.anyPhase() {
 		response.Results = make([]Result, 0, count)
 		for i := range count {
-			target := targets.At(start + uint64(i))
+			target := batchTargets[i]
 			response.Results = append(response.Results, Result{Addr: target.Addr, Port: target.Port, Passed: true})
 			session.recordProbe(true)
 		}
@@ -162,7 +169,7 @@ launch:
 			<-slots
 			break
 		}
-		target := targets.At(start + uint64(i))
+		target := batchTargets[i]
 		wg.Add(1)
 		go func(index int, target Target) {
 			defer wg.Done()

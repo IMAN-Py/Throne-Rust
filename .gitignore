@@ -89,3 +89,12 @@ out
 srslist.h
 .claude
 .qtcreator
+
+# Rust & Windows MSI Installer
+/throne_fast_core/target/
+/installer/stage/
+/installer/Package.gen.wxs
+/installer/*.msi
+/installer/*.wixpdb
+/tests/*.exe
+/tests/*.obj

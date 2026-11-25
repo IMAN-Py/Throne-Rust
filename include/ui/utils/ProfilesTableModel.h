@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QSet>
 #include <QColor>
+#include <list>
 #include <memory>
 
 #include "include/database/entities/GroupSort.h"
@@ -120,8 +121,9 @@ private:
     int m_pinnedCount = 0;
     mutable QHash<int, int> id2row;
     mutable QHash<int, std::shared_ptr<Configs::Profile>> m_cache;
-    mutable QList<int> m_lruOrder;
-    int m_cacheSize = 100;
+    mutable std::list<int> m_lruOrder;
+    mutable QHash<int, std::list<int>::iterator> m_lruPos;
+    int m_cacheSize = 512;
     // Resolving an endpoint source can query the IP lists, so it runs once per row, not per paint.
     mutable QHash<int, QString> m_addressCache;
 

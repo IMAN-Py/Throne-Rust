@@ -3,7 +3,11 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <deque>
+#include <unordered_map>
+#include <vector>
 
+#include "include/throne_fast_core.h"
 #include "include/global/Configs.hpp"
 
 namespace Configs
@@ -116,23 +120,58 @@ namespace Configs
         return ent->type + "|" + QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
     }
 
+    namespace {
+        struct FastProfileKey {
+            uint64_t hash;
+            QByteArray bytes;
+
+            bool operator==(const FastProfileKey &other) const noexcept {
+                return hash == other.hash && bytes == other.bytes;
+            }
+        };
+
+        struct FastProfileKeyHash {
+            size_t operator()(const FastProfileKey &k) const noexcept {
+                return static_cast<size_t>(k.hash);
+            }
+        };
+
+        inline FastProfileKey makeFastKey(const QString &keyStr) {
+            QByteArray utf8 = keyStr.toUtf8();
+            const uint64_t h = throne_fast_xxhash64(
+                reinterpret_cast<const uint8_t*>(utf8.constData()),
+                static_cast<size_t>(utf8.size()),
+                0);
+            return FastProfileKey{h, std::move(utf8)};
+        }
+    }
+
     void ProfileFilter::Uniq(const QList<std::shared_ptr<Profile>> &in,
                              QList<std::shared_ptr<Profile>> &out,
                              bool keep_last, bool ignoreMetadata) {
-        QMap<QString, std::shared_ptr<Profile>> hashMap;
+        std::unordered_map<FastProfileKey, size_t, FastProfileKeyHash> seen;
+        seen.reserve(static_cast<size_t>(in.size()));
+        std::vector<std::shared_ptr<Profile>> entries;
+        entries.reserve(static_cast<size_t>(in.size()));
 
-        for (const auto &ent: in) {
-            QString key = ProfileFilter_ent_key(ent, ignoreMetadata);
-            if (hashMap.contains(key)) {
+        for (const auto &ent : in) {
+            FastProfileKey key = makeFastKey(ProfileFilter_ent_key(ent, ignoreMetadata));
+            auto it = seen.find(key);
+            if (it != seen.end()) {
                 if (keep_last) {
-                    out.removeAll(hashMap[key]);
-                    hashMap[key] = ent;
-                    out += ent;
+                    entries[it->second].reset();
+                    entries.push_back(ent);
+                    it->second = entries.size() - 1;
                 }
             } else {
-                hashMap[key] = ent;
-                out += ent;
+                entries.push_back(ent);
+                seen.emplace(std::move(key), entries.size() - 1);
             }
+        }
+
+        out.reserve(out.size() + static_cast<qsizetype>(entries.size()));
+        for (auto &entry : entries) {
+            if (entry) out.append(std::move(entry));
         }
     }
 
@@ -141,17 +180,19 @@ namespace Configs
                                QList<std::shared_ptr<Profile>> &outSrc,
                                QList<std::shared_ptr<Profile>> &outDst,
                                bool ignoreMetadata) {
-        QMap<QString, QList<std::shared_ptr<Profile>>> srcByKey;
+        std::unordered_map<FastProfileKey, std::deque<std::shared_ptr<Profile>>, FastProfileKeyHash> srcByKey;
+        srcByKey.reserve(static_cast<size_t>(src.size()));
 
-        for (const auto &ent: src) {
-            srcByKey[ProfileFilter_ent_key(ent, ignoreMetadata)].append(ent);
+        for (const auto &ent : src) {
+            srcByKey[makeFastKey(ProfileFilter_ent_key(ent, ignoreMetadata))].push_back(ent);
         }
         // A src entry can be claimed once: handing the same one to every dst duplicate collapses N identical servers into one profile (#1775).
-        for (const auto &ent: dst) {
-            auto it = srcByKey.find(ProfileFilter_ent_key(ent, ignoreMetadata));
-            if (it == srcByKey.end() || it->isEmpty()) continue;
+        for (const auto &ent : dst) {
+            auto it = srcByKey.find(makeFastKey(ProfileFilter_ent_key(ent, ignoreMetadata)));
+            if (it == srcByKey.end() || it->second.empty()) continue;
             outDst += ent;
-            outSrc += it->takeFirst();
+            outSrc += std::move(it->second.front());
+            it->second.pop_front();
         }
     }
 
@@ -159,23 +200,29 @@ namespace Configs
                                   const QList<std::shared_ptr<Profile>> &dst,
                                   QList<std::shared_ptr<Profile>> &out,
                                   bool ignoreMetadata) {
-        QMap<QString, bool> hashMap;
+        std::unordered_map<FastProfileKey, bool, FastProfileKeyHash> dstKeys;
+        dstKeys.reserve(static_cast<size_t>(dst.size()));
 
-        for (const auto &ent: dst) {
-            QString key = ProfileFilter_ent_key(ent, ignoreMetadata);
-            hashMap[key] = true;
+        for (const auto &ent : dst) {
+            dstKeys.emplace(makeFastKey(ProfileFilter_ent_key(ent, ignoreMetadata)), true);
         }
-        for (const auto &ent: src) {
-            QString key = ProfileFilter_ent_key(ent, ignoreMetadata);
-            if (!hashMap.contains(key)) out += ent;
+        for (const auto &ent : src) {
+            if (dstKeys.find(makeFastKey(ProfileFilter_ent_key(ent, ignoreMetadata))) == dstKeys.end()) {
+                out += ent;
+            }
         }
     }
 
     void ProfileFilter::OnlyInSrc_ByPointer(const QList<std::shared_ptr<Profile>> &src,
                                             const QList<std::shared_ptr<Profile>> &dst,
                                             QList<std::shared_ptr<Profile>> &out) {
-        for (const auto &ent: src) {
-            if (!dst.contains(ent)) out += ent;
+        QSet<const Profile *> dstSet;
+        dstSet.reserve(dst.size());
+        for (const auto &ent : dst) {
+            dstSet.insert(ent.get());
+        }
+        for (const auto &ent : src) {
+            if (!dstSet.contains(ent.get())) out += ent;
         }
     }
 
@@ -183,30 +230,34 @@ namespace Configs
                                           QList<std::shared_ptr<Profile>> &dst,
                                           QList<std::shared_ptr<Profile>> &changedSrc,
                                           QList<std::shared_ptr<Profile>> &changedDst) {
-        QMap<QString, QList<std::shared_ptr<Profile>>> srcByKey;
-        for (const auto &ent: src) {
-            srcByKey[ProfileFilter_ent_identity_key(ent)].append(ent);
+        std::unordered_map<FastProfileKey, std::deque<std::shared_ptr<Profile>>, FastProfileKeyHash> srcByKey;
+        srcByKey.reserve(static_cast<size_t>(src.size()));
+        for (const auto &ent : src) {
+            srcByKey[makeFastKey(ProfileFilter_ent_identity_key(ent))].push_back(ent);
         }
 
         QSet<Profile *> matchedSrc;
+        matchedSrc.reserve(qMin(src.size(), dst.size()));
         QList<std::shared_ptr<Profile>> remainingDst;
-        for (const auto &ent: dst) {
-            auto &bucket = srcByKey[ProfileFilter_ent_identity_key(ent)];
-            if (bucket.isEmpty()) {
+        for (const auto &ent : dst) {
+            auto it = srcByKey.find(makeFastKey(ProfileFilter_ent_identity_key(ent)));
+            if (it == srcByKey.end() || it->second.empty()) {
                 remainingDst += ent;
                 continue;
             }
-            auto srcEnt = bucket.takeFirst();
+            auto srcEnt = std::move(it->second.front());
+            it->second.pop_front();
             changedSrc += srcEnt;
             changedDst += ent;
             matchedSrc.insert(srcEnt.get());
         }
 
         QList<std::shared_ptr<Profile>> remainingSrc;
-        for (const auto &ent: src) {
+        remainingSrc.reserve(src.size());
+        for (const auto &ent : src) {
             if (!matchedSrc.contains(ent.get())) remainingSrc += ent;
         }
-        src = remainingSrc;
-        dst = remainingDst;
+        src = std::move(remainingSrc);
+        dst = std::move(remainingDst);
     }
 }

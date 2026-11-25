@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"ThroneCore/internal/fastcore"
+
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
@@ -615,6 +617,14 @@ func (x *xdnsExchanger) exchange(ctx context.Context, queries []xdnsQuery, inter
 }
 
 func parseXDNSReply(packet []byte, query xdnsQuery) (xdnsReply, bool) {
+	if query.name.Length > 0 {
+		if res, ok := fastcore.MatchXDNSReply(packet, query.id, query.name.Data[:query.name.Length]); ok {
+			return xdnsReply{
+				rcode: dnsmessage.RCode(res.RCode),
+				txt:   res.HasTXT != 0,
+			}, res.Matched != 0
+		}
+	}
 	var parser dnsmessage.Parser
 	header, err := parser.Start(packet)
 	if err != nil || !header.Response || header.ID != query.id {

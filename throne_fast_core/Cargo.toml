@@ -1,0 +1,20 @@
+[package]
+name = "throne_fast_core"
+version = "1.4.2"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Native Rust acceleration core (SIMD hashing, arena IPv4/IPv6 trie, batch scan target permutation, CIDR normalization, zero-alloc DNS & GeoIP lookup) for Throne"
+
+[lib]
+name = "throne_fast_core"
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+opt-level = 2

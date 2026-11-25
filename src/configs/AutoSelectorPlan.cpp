@@ -187,6 +187,16 @@ namespace Configs
         // Read once up front: a sweep still running rewrites latencies, and a comparator that changes its answer mid-sort is UB.
         void sortByLatency(QList<int> &ids, const autoSelector *selector, qint64 now, const QSet<int> &untrusted = {})
         {
+            QList<int> batchIds;
+            batchIds.reserve(ids.size());
+            for (int id : std::as_const(ids)) {
+                if (!untrusted.contains(id)) batchIds << id;
+            }
+            const auto prefetched = batchIds.isEmpty()
+                                        ? QList<std::shared_ptr<Profile>>{}
+                                        : dataManager->profilesRepo->GetProfileBatch(batchIds);
+            Q_UNUSED(prefetched);
+
             QHash<int, int> latency;
             latency.reserve(ids.size());
             for (int id : std::as_const(ids)) {
@@ -218,6 +228,22 @@ namespace Configs
                 if (plan != nullptr) plan->error = "Auto selector points at a group that no longer exists";
                 return members;
             }
+
+            QList<int> prefetchIds;
+            for (const auto &group : groups) {
+                if (group->landing_proxy_id >= 0) prefetchIds << group->landing_proxy_id;
+                if (group->front_proxy_id >= 0) prefetchIds << group->front_proxy_id;
+                const auto displayed = group->DisplayedProfiles();
+                prefetchIds.reserve(prefetchIds.size() + displayed.size());
+                for (int id : displayed) {
+                    if (id != ent->id) prefetchIds << id;
+                }
+            }
+            const auto prefetched = prefetchIds.isEmpty()
+                                        ? QList<std::shared_ptr<Profile>>{}
+                                        : dataManager->profilesRepo->GetProfileBatch(prefetchIds);
+            Q_UNUSED(prefetched);
+
             const auto filters = buildFilters(selector);
             const auto now = QDateTime::currentSecsSinceEpoch();
             QMap<AutoSelectorSkip, int> skips;

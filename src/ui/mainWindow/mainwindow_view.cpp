@@ -6,11 +6,13 @@
 
 #include <QApplication>
 #include <QHeaderView>
+#include <QPointer>
 #include <QScrollBar>
 #include <QSet>
 #include <QTimer>
 #include <QToolButton>
 
+#include "include/throne_fast_core.h"
 #include "include/api/RPC.h"
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
@@ -76,10 +78,26 @@ void MainWindow::UpdateDataView(bool force)
         return;
     }
     auto content = dataViewHtmlGenerator_.build();
-    runOnUiThread([=, this] {
-        ui->data_view->setHtml(content.html);
-        ui->data_view->setToolTip(content.toolTip);
-    }, true);
+    const uint64_t htmlHash = throne_fast_xxhash64(
+        reinterpret_cast<const uint8_t*>(content.html.constData()),
+        static_cast<size_t>(content.html.size()) * sizeof(QChar),
+        0);
+    const uint64_t tipHash = throne_fast_xxhash64(
+        reinterpret_cast<const uint8_t*>(content.toolTip.constData()),
+        static_cast<size_t>(content.toolTip.size()) * sizeof(QChar),
+        0);
+    QPointer<MainWindow> safeThis(this);
+    runOnUiThread([safeThis, force, htmlHash, tipHash, content = std::move(content)]() {
+        if (!safeThis) return;
+        if (force || htmlHash != safeThis->m_lastDataViewHtmlHash) {
+            safeThis->m_lastDataViewHtmlHash = htmlHash;
+            safeThis->ui->data_view->setHtml(content.html);
+        }
+        if (force || tipHash != safeThis->m_lastDataViewTipHash) {
+            safeThis->m_lastDataViewTipHash = tipHash;
+            safeThis->ui->data_view->setToolTip(content.toolTip);
+        }
+    }, false);
     lastUpdatedMs.store(QDateTime::currentMSecsSinceEpoch());
 }
 

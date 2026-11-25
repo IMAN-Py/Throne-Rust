@@ -20,8 +20,11 @@ func connMetaToProto(c *trafficcontrol.TrackerMetadata, ruleItem string) *gen.Co
 		if len(c.Metadata.ProcessInfo.ProcessPaths) > 0 {
 			processPath = c.Metadata.ProcessInfo.ProcessPaths[0]
 		}
-		spl := strings.Split(processPath, string(os.PathSeparator))
-		process = spl[len(spl)-1]
+		if idx := strings.LastIndexByte(processPath, os.PathSeparator); idx >= 0 {
+			process = processPath[idx+1:]
+		} else {
+			process = processPath
+		}
 	}
 	var closedAt int64
 	if !c.ClosedAt.IsZero() {
@@ -68,12 +71,14 @@ func (s *server) QueryConnections(ctx context.Context, in *gen.EmptyReq) (*gen.Q
 
 	connRules.begin(box)
 	defer connRules.end()
-	active := make([]*gen.ConnectionMetaData, 0)
-	for _, c := range tm.Connections() {
+	rawActive := tm.Connections()
+	active := make([]*gen.ConnectionMetaData, 0, len(rawActive))
+	for _, c := range rawActive {
 		active = append(active, connMetaToProto(c, connRules.matched(c)))
 	}
-	closed := make([]*gen.ConnectionMetaData, 0)
-	for _, c := range tm.ClosedConnections() {
+	rawClosed := tm.ClosedConnections()
+	closed := make([]*gen.ConnectionMetaData, 0, len(rawClosed))
+	for _, c := range rawClosed {
 		closed = append(closed, connMetaToProto(c, connRules.matched(c)))
 	}
 	return &gen.QueryConnectionsResp{Active: active, Closed: closed}, nil
