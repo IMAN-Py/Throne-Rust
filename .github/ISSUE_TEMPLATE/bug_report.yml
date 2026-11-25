@@ -22,6 +22,7 @@ body:
       label: Installation type
       description: Please provide the Throne installation type
       options:
+        - msi
         - zip
         - exe
         - deb
