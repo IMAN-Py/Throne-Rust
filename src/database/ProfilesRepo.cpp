@@ -2,7 +2,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <charconv>
 #include <map>
+#include <unordered_map>
 
 #include "include/database/GroupsRepo.h"
 #include "include/configs/common/OutboundFactory.h"
@@ -164,15 +166,17 @@ namespace Configs {
     std::shared_ptr<Profile> ProfilesRepo::profileFromRow(SQLite::Statement& stmt) const {
         const auto colUtf8 = [&stmt](int idx) -> QString {
             const auto col = stmt.getColumn(idx);
+            if (col.isNull()) return {};
+            const char* text = col.getText();
             const int len = col.size();
-            if (len <= 0 || col.isNull()) return {};
-            return QString::fromUtf8(col.getText(), len);
+            if (!text || len <= 0) return {};
+            return QString::fromUtf8(text, len);
         };
 
         auto profile = std::make_shared<Profile>();
         profile->id = stmt.getColumn(0).getInt();
         profile->type = colUtf8(1);
-        profile->name = colUtf8(2);
+        // Column 2 (name) is skipped because line 211 sets profile->name = profile->outbound->name.
         profile->gid = stmt.getColumn(3).getInt();
         profile->latency = stmt.getColumn(4).getInt();
         profile->latency_at = static_cast<qint64>(stmt.getColumn(5).getInt64());
@@ -182,21 +186,28 @@ namespace Configs {
         profile->ip_out = colUtf8(9);
 
         const auto colOut = stmt.getColumn(10);
-        const auto outboundDoc = (colOut.size() > 0 && !colOut.isNull())
-            ? QJsonDocument::fromJson(QByteArray::fromRawData(colOut.getText(), colOut.size()))
-            : QJsonDocument();
+        QJsonDocument outboundDoc;
+        if (!colOut.isNull()) {
+            const char* outPtr = colOut.getText();
+            const int outSize = colOut.size();
+            if (outPtr && outSize > 0) {
+                outboundDoc = QJsonDocument::fromJson(QByteArray::fromRawData(outPtr, outSize));
+            }
+        }
 
         profile->traffic_downlink = static_cast<qint64>(stmt.getColumn(11).getInt64());
         profile->traffic_uplink = static_cast<qint64>(stmt.getColumn(12).getInt64());
 
         const auto colEp = stmt.getColumn(13);
-        const int epSize = colEp.size();
-        const char* epPtr = colEp.getText();
         QJsonObject epObj;
-        if (!colEp.isNull() && epSize > 0 && !(epSize == 2 && epPtr[0] == '{' && epPtr[1] == '}')) {
-            const auto endpointDoc = QJsonDocument::fromJson(QByteArray::fromRawData(epPtr, epSize));
-            if (endpointDoc.isObject()) {
-                epObj = endpointDoc.object();
+        if (!colEp.isNull()) {
+            const char* epPtr = colEp.getText();
+            const int epSize = colEp.size();
+            if (epPtr && epSize > 0 && !(epSize == 2 && epPtr[0] == '{' && epPtr[1] == '}')) {
+                const auto endpointDoc = QJsonDocument::fromJson(QByteArray::fromRawData(epPtr, epSize));
+                if (endpointDoc.isObject()) {
+                    epObj = endpointDoc.object();
+                }
             }
         }
         profile->endpoint = EndpointSource::FromJson(epObj);
@@ -306,22 +317,31 @@ namespace Configs {
         return profile;
     }
 
-    std::map<int, std::shared_ptr<Profile>> ProfilesRepo::loadProfilesByIdsChunk(const QList<int>& chunkIds) const {
-        std::map<int, std::shared_ptr<Profile>> result;
+    std::unordered_map<int, std::shared_ptr<Profile>> ProfilesRepo::loadProfilesByIdsChunk(const QList<int>& chunkIds) const {
+        std::unordered_map<int, std::shared_ptr<Profile>> result;
         if (chunkIds.isEmpty()) return result;
-        QString idList;
-        for (int i = 0; i < chunkIds.size(); ++i) {
-            if (i > 0) idList += ",";
-            idList += QString::number(chunkIds[i]);
+        static constexpr char kSelectPrefix[] =
+            "SELECT id, type, name, gid, latency, latency_at, dl_speed, ul_speed, test_country, "
+            "ip_out, outbound_json, traffic_dl, traffic_up, endpoint_json, service_checks FROM profiles WHERE id IN (";
+        std::string sql;
+        sql.reserve(sizeof(kSelectPrefix) + static_cast<size_t>(chunkIds.size()) * 12 + 16);
+        sql.append(kSelectPrefix, sizeof(kSelectPrefix) - 1);
+        char numBuf[16];
+        for (qsizetype i = 0; i < chunkIds.size(); ++i) {
+            if (i > 0) sql.push_back(',');
+            auto [ptr, ec] = std::to_chars(numBuf, numBuf + sizeof(numBuf), chunkIds[i]);
+            if (ec == std::errc{}) {
+                sql.append(numBuf, static_cast<size_t>(ptr - numBuf));
+            }
         }
-        std::string sql = "SELECT id, type, name, gid, latency, latency_at, dl_speed, ul_speed, test_country, "
-                         "ip_out, outbound_json, traffic_dl, traffic_up, endpoint_json, service_checks FROM profiles WHERE id IN (" +
-                         idList.toStdString() + ") ORDER BY id";
+        sql.append(") ORDER BY id");
         auto query = db.query(sql);
         if (!query) return result;
+        result.reserve(static_cast<size_t>(chunkIds.size()));
         while (query->executeStep()) {
             auto profile = profileFromRow(*query);
-            result[profile->id] = std::move(profile);
+            const int pid = profile->id;
+            result.emplace(pid, std::move(profile));
         }
         return result;
     }
@@ -329,15 +349,17 @@ namespace Configs {
     QList<std::shared_ptr<Profile>> ProfilesRepo::GetProfileBatch(QList<int> ids) {
         QList<std::shared_ptr<Profile>> profiles;
         if (ids.isEmpty()) return profiles;
+        profiles.reserve(ids.size());
 
-        std::map<int, std::shared_ptr<Profile>> byId;
+        std::unordered_map<int, std::shared_ptr<Profile>> byId;
+        byId.reserve(static_cast<size_t>(ids.size()));
         QList<int> missingIds;
         QMutexLocker locker(&mutex);
         for (int id : ids) {
             auto it = identityMap.find(id);
             if (it != identityMap.end()) {
                 if (auto shared = it->second.lock()) {
-                    byId[id] = shared;
+                    byId.emplace(id, std::move(shared));
                     continue;
                 }
                 identityMap.erase(it);
@@ -355,8 +377,10 @@ namespace Configs {
         for (int off = 0; off < missingIds.size(); off += Configs::BATCH_LIMIT_READ) {
             int end = std::min(off + Configs::BATCH_LIMIT_READ, static_cast<int>(missingIds.size()));
             auto chunk = missingIds.sliced(off, end - off);
-            std::map<int, std::shared_ptr<Profile>> loaded = loadProfilesByIdsChunk(chunk);
-            for (auto& p : loaded) byId[p.first] = std::move(p.second);
+            auto loaded = loadProfilesByIdsChunk(chunk);
+            for (auto& p : loaded) {
+                byId[p.first] = std::move(p.second);
+            }
         }
         for (const auto& p : byId) {
             identityMap[p.first] = std::weak_ptr<Profile>(p.second);

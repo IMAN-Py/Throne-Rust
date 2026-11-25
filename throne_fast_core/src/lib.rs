@@ -16,6 +16,7 @@ pub const FEATURE_SCAN_BATCH: u64 = 1 << 3;
 pub const FEATURE_DNS_XDNS: u64 = 1 << 4;
 pub const FEATURE_DOMAIN_ROUTER: u64 = 1 << 5;
 pub const FEATURE_GEO_INDEX: u64 = 1 << 6;
+pub const FEATURE_IPLIST_COMPACT: u64 = 1 << 7;
 
 static VERSION_CSTR: &[u8] = b"throne_fast_core 1.4.2-rust (ABI 2.1)\0";
 
@@ -38,6 +39,7 @@ pub extern "C" fn throne_fast_features() -> u64 {
         | FEATURE_DNS_XDNS
         | FEATURE_DOMAIN_ROUTER
         | FEATURE_GEO_INDEX
+        | FEATURE_IPLIST_COMPACT
 }
 
 #[cfg(test)]
@@ -47,6 +49,6 @@ mod tests {
     #[test]
     fn abi_and_features_present() {
         assert_eq!(throne_fast_abi_version(), THRONE_FAST_ABI_VERSION);
-        assert_ne!(throne_fast_features(), 0);
+        assert_eq!(throne_fast_features(), 0xFF);
     }
 }

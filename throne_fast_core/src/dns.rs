@@ -59,8 +59,8 @@ pub fn unpack_dns_name(pkt: &[u8], start: usize, out_buf: &mut [u8; 256]) -> Opt
                 jumped = true;
             }
             hops += 1;
-            if hops > 128 {
-                return None; // Compression pointer cycle guard
+            if hops > 10 {
+                return None; // Compression pointer cycle / depth guard (matches Go dnsmessage)
             }
             cur = ptr;
         } else if tag == 0 {
@@ -73,8 +73,12 @@ pub fn unpack_dns_name(pkt: &[u8], start: usize, out_buf: &mut [u8; 256]) -> Opt
             if label_end > pkt.len() {
                 return None;
             }
-            // Need room for label + trailing '.' inside 255 bytes
-            if out_len + label_len + 1 > 255 {
+            // Reject literal '.' inside a wire label (matches Go dnsmessage.Name.unpack).
+            if pkt[label_start..label_end].contains(&b'.') {
+                return None;
+            }
+            // Match Go dnsmessage.nonEncodedNameMax (254): out_len + label_len + trailing '.' <= 254.
+            if out_len + label_len >= 254 {
                 return None;
             }
             out_buf[out_len..out_len + label_len].copy_from_slice(&pkt[label_start..label_end]);
@@ -102,34 +106,29 @@ fn dns_name_eq_ignore_ascii_case(a: &[u8], b: &[u8]) -> bool {
     true
 }
 
-/// Skip a DNS name cleanly without decoding characters, preventing compression pointer cycles.
+/// Skip a wire DNS name matching Go `dnsmessage.skipName` (validates literals & tag bits, stops on 2-byte pointer).
 fn skip_dns_name(pkt: &[u8], start: usize) -> Option<usize> {
     let mut cur = start;
-    let mut hops = 0usize;
     loop {
         if cur >= pkt.len() {
             return None;
         }
         let b = pkt[cur];
-        if b == 0 {
-            return Some(cur + 1);
-        }
         let tag = b & 0xC0;
-        if tag == 0xC0 {
-            if cur + 1 >= pkt.len() {
-                return None;
+        if tag == 0 {
+            if b == 0 {
+                return Some(cur + 1);
             }
-            return Some(cur + 2);
-        } else if tag == 0 {
             let next = cur + 1 + (b as usize);
             if next > pkt.len() {
                 return None;
             }
             cur = next;
-            hops += 1;
-            if hops > 128 {
+        } else if tag == 0xC0 {
+            if cur + 1 >= pkt.len() {
                 return None;
             }
+            return Some(cur + 2);
         } else {
             return None;
         }
@@ -222,12 +221,6 @@ pub fn match_xdns_reply(pkt: &[u8], expected_id: u16, expected_name: &[u8]) -> T
         let Some(rdata_start) = after_name.checked_add(10) else {
             return reply_base;
         };
-        let Some(rdata_end) = rdata_start.checked_add(rdlen as usize) else {
-            return reply_base;
-        };
-        if rdata_end > pkt.len() {
-            return reply_base;
-        }
 
         if rtype == DNS_TYPE_TXT
             && rclass == DNS_CLASS_IN
@@ -240,13 +233,19 @@ pub fn match_xdns_reply(pkt: &[u8], expected_id: u16, expected_name: &[u8]) -> T
                 _pad: 0,
             };
         }
+        let Some(rdata_end) = rdata_start.checked_add(rdlen as usize) else {
+            return reply_base;
+        };
+        if rdata_end > pkt.len() {
+            return reply_base;
+        }
         off = rdata_end;
     }
 
     reply_base
 }
 
-/// Validates basic RFC 1035 DNS packet structure (header + questions + answers bounds).
+/// Validates RFC 1035 DNS packet structure (header, questions, answers, and compression pointers).
 /// Returns 1 if structurally valid, 0 otherwise.
 ///
 /// # Safety
@@ -260,8 +259,9 @@ pub unsafe extern "C" fn throne_fast_dns_validate_packet(pkt: *const u8, len: us
     let qd = u16::from_be_bytes([b[4], b[5]]);
     let an = u16::from_be_bytes([b[6], b[7]]);
     let mut off = 12usize;
+    let mut scratch = [0u8; 256];
     for _ in 0..qd {
-        let Some(n_off) = skip_dns_name(b, off) else {
+        let Some((_, n_off)) = unpack_dns_name(b, off, &mut scratch) else {
             return 0;
         };
         let Some(next) = n_off.checked_add(4) else {
@@ -273,7 +273,7 @@ pub unsafe extern "C" fn throne_fast_dns_validate_packet(pkt: *const u8, len: us
         off = next;
     }
     for _ in 0..an {
-        let Some(n_off) = skip_dns_name(b, off) else {
+        let Some((_, n_off)) = unpack_dns_name(b, off, &mut scratch) else {
             return 0;
         };
         let Some(rdlen) = read_be16(b, n_off + 8) else {
@@ -361,14 +361,45 @@ mod tests {
 
     #[test]
     fn xdns_compression_loop_and_truncated_safe() {
-        let mut bad = vec![0u8; 16];
+        let mut bad = vec![0u8; 18];
         bad[0..4].copy_from_slice(&[0x12, 0x34, 0x80, 0x00]);
         bad[4..6].copy_from_slice(&1u16.to_be_bytes());
-        // Self-referential pointer loop at offset 12 -> 0xC0 0x0C
+        // Self-referential pointer loop at offset 12 -> 0xC0 0x0C with QTYPE+QCLASS fitting in 18 bytes
         bad[12] = 0xC0;
         bad[13] = 12;
+        bad[15] = 16;
+        bad[17] = 1;
         let r = match_xdns_reply(&bad, 0x1234, b"a.com.");
         assert_eq!(r.matched, 0);
         assert_eq!(unsafe { throne_fast_dns_validate_packet(bad.as_ptr(), bad.len()) }, 0);
+
+        // Out-of-bounds compression pointer
+        let mut oob = bad.clone();
+        oob[13] = 200;
+        assert_eq!(unsafe { throne_fast_dns_validate_packet(oob.as_ptr(), oob.len()) }, 0);
+
+        // Valid compressed packet must validate as 1
+        let ok = sample_xdns_reply(0x4242, 0, true, true);
+        assert_eq!(unsafe { throne_fast_dns_validate_packet(ok.as_ptr(), ok.len()) }, 1);
+
+        // Label containing literal '.' must be rejected (matches Go dnsmessage)
+        let mut dot_label = vec![0x12, 0x34, 0x80, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
+        dot_label.extend_from_slice(&[3, b'a', b'.', b'b', 0, 0, 16, 0, 1]);
+        assert_eq!(match_xdns_reply(&dot_label, 0x1234, b"a.b.").matched, 0);
+        assert_eq!(unsafe { throne_fast_dns_validate_packet(dot_label.as_ptr(), dot_label.len()) }, 0);
+    }
+
+    #[test]
+    fn xdns_rejects_more_than_ten_pointer_hops() {
+        // Build chain of 11 pointers: at offset 12 -> 14 -> ... -> 32 -> root 0
+        let mut pkt = vec![0x12, 0x34, 0x80, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
+        for hop in 0..11usize {
+            let target = 12 + (hop + 1) * 2;
+            pkt.push(0xC0);
+            pkt.push(target as u8);
+        }
+        pkt.extend_from_slice(&[1, b'a', 0, 0, 16, 0, 1]);
+        let mut buf = [0u8; 256];
+        assert!(unpack_dns_name(&pkt, 12, &mut buf).is_none());
     }
 }

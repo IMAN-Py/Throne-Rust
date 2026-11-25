@@ -86,17 +86,26 @@ void MainWindow::UpdateDataView(bool force)
         reinterpret_cast<const uint8_t*>(content.toolTip.constData()),
         static_cast<size_t>(content.toolTip.size()) * sizeof(QChar),
         0);
-    QPointer<MainWindow> safeThis(this);
-    runOnUiThread([safeThis, force, htmlHash, tipHash, content = std::move(content)]() {
-        if (!safeThis) return;
-        if (force || htmlHash != safeThis->m_lastDataViewHtmlHash) {
-            safeThis->m_lastDataViewHtmlHash = htmlHash;
-            safeThis->ui->data_view->setHtml(content.html);
+    MainWindow *self = this;
+    auto alive = m_dataViewAlive;
+    runOnUiThread([self, alive = std::move(alive), force, htmlHash, tipHash, content = std::move(content)]() {
+        if (!alive || !alive->load(std::memory_order_acquire)) return;
+        if (content.seq <= self->m_appliedDataViewSeq) return;
+        self->m_appliedDataViewSeq = content.seq;
+        const bool firstApply = !self->m_hasDataViewSnapshot;
+        const qsizetype htmlLen = content.html.size();
+        const qsizetype tipLen = content.toolTip.size();
+        if (force || firstApply || htmlLen != self->m_lastDataViewHtmlLen || htmlHash != self->m_lastDataViewHtmlHash) {
+            self->m_lastDataViewHtmlHash = htmlHash;
+            self->m_lastDataViewHtmlLen = htmlLen;
+            self->ui->data_view->setHtml(content.html);
         }
-        if (force || tipHash != safeThis->m_lastDataViewTipHash) {
-            safeThis->m_lastDataViewTipHash = tipHash;
-            safeThis->ui->data_view->setToolTip(content.toolTip);
+        if (force || firstApply || tipLen != self->m_lastDataViewTipLen || tipHash != self->m_lastDataViewTipHash) {
+            self->m_lastDataViewTipHash = tipHash;
+            self->m_lastDataViewTipLen = tipLen;
+            self->ui->data_view->setToolTip(content.toolTip);
         }
+        self->m_hasDataViewSnapshot = true;
     }, false);
     lastUpdatedMs.store(QDateTime::currentMSecsSinceEpoch());
 }

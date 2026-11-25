@@ -1,4 +1,5 @@
 #include "include/database/IpListsRepo.h"
+#include "include/throne_fast_core.h"
 
 #include <QSet>
 
@@ -8,6 +9,7 @@
 #include <mutex>
 #include <thread>
 #include <tuple>
+#include <unordered_set>
 
 namespace Configs {
     namespace {
@@ -122,17 +124,36 @@ namespace Configs {
                              [&key](const IpListEntry &a, const IpListEntry &b) { return key(a) < key(b); });
         }
 
+        struct IpPortKey {
+            uint64_t hash;
+            int port;
+            QString cidr;
+
+            bool operator==(const IpPortKey &other) const noexcept {
+                return hash == other.hash && port == other.port && cidr == other.cidr;
+            }
+        };
+
+        struct IpPortKeyHash {
+            size_t operator()(const IpPortKey &key) const noexcept {
+                return static_cast<size_t>(key.hash);
+            }
+        };
+
         QList<IpListEntry> ipListsRepoUnique(const QList<IpListEntry> &entries) {
             QList<IpListEntry> unique;
             unique.reserve(entries.size());
-            QSet<QString> seen;
-            seen.reserve(entries.size());
+            std::unordered_set<IpPortKey, IpPortKeyHash> seen;
+            seen.reserve(static_cast<size_t>(entries.size()));
             for (const auto &entry : entries) {
                 if (entry.cidr.isEmpty()) continue;
-                const QString key = entry.cidr + QLatin1Char(' ') + QString::number(entry.port);
-                const auto before = seen.size();
-                seen.insert(key);
-                if (seen.size() != before) unique.append(entry);
+                const uint64_t h = throne_fast_xxhash64(
+                    reinterpret_cast<const uint8_t *>(entry.cidr.utf16()),
+                    static_cast<size_t>(entry.cidr.size()) * sizeof(char16_t),
+                    static_cast<uint64_t>(static_cast<uint32_t>(entry.port)));
+                if (seen.emplace(IpPortKey{h, entry.port, entry.cidr}).second) {
+                    unique.append(entry);
+                }
             }
             return unique;
         }

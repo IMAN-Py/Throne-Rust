@@ -15,6 +15,9 @@ on:
     branches: [ main, dev ]
   workflow_dispatch:
 
+env:
+  PROTOC_VERSION: "36.2"
+
 jobs:
   rust-go-cpp-windows:
     runs-on: windows-latest
@@ -28,6 +31,25 @@ jobs:
           go-version-file: core/go.mod
 
       - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install protoc and Go protobuf plugins
+        shell: pwsh
+        run: |
+          $protocUrl = "https://github.com/protocolbuffers/protobuf/releases/download/v$env:PROTOC_VERSION/protoc-$env:PROTOC_VERSION-win64.zip"
+          $protocZip = "$env:RUNNER_TEMP\protoc.zip"
+          $protocDir = "$env:RUNNER_TEMP\protoc"
+          Invoke-WebRequest -Uri $protocUrl -OutFile $protocZip
+          Expand-Archive -Path $protocZip -DestinationPath $protocDir -Force
+          "$protocDir\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH = "$protocDir\bin;$env:PATH"
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+          $goBin = "$(go env GOPATH)\bin"
+          $goBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH = "$goBin;$env:PATH"
+          Push-Location core\gen
+          protoc -I . --go_out=. --go-grpc_out=. libcore.proto
+          Pop-Location
 
       - name: Build and test Rust crate (throne_fast_core)
         shell: pwsh

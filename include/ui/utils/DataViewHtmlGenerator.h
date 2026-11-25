@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include <QString>
 #include <QStringList>
 #include <QMutex>
@@ -67,6 +69,7 @@ public:
     struct Content {
         QString html;
         QString toolTip;
+        uint64_t seq = 0;
     };
 
     static constexpr auto RestartActionUrl = "throne-action:restart-proxy";
@@ -126,6 +129,7 @@ private:
 
     // Pool threads seed panels while build reads them.
     mutable QMutex mu_;
+    uint64_t nextSeq_ = 0;
 
     DownloadPanelState download_ = {};
     SpeedtestPanelState speedtest_ = {};

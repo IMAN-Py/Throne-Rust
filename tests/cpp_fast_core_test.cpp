@@ -62,7 +62,7 @@ uint64_t scalar_fnv1a(const uint8_t* p, size_t n) {
 
 int main() {
     CHECK(throne_fast_abi_version() == THRONE_FAST_ABI_VERSION, "ABI version mismatch");
-    CHECK(throne_fast_features() == 0x7Full, "expected all 7 acceleration features");
+    CHECK(throne_fast_features() == 0xFFull, "expected all 8 acceleration features");
     const char* ver = throne_fast_version_string();
     CHECK(ver != nullptr && std::strstr(ver, "1.4.2-rust") != nullptr, "unexpected version string");
 
@@ -82,6 +82,12 @@ int main() {
     CHECK(throne::fast::normalize_cidr("[::1]/128") == "::1/128", "bracketed ipv6 cidr");
     CHECK(throne::fast::normalize_cidr("10.0.0.1/33").empty(), "reject >32 prefix");
     CHECK(throne::fast::normalize_cidr("not-an-ip").empty(), "reject invalid ip");
+
+    CHECK(throne::fast::normalize_cidr_compact("1.2.3.4/32") == "1.2.3.4", "compact v4 omits /32");
+    CHECK(throne::fast::normalize_cidr_compact("2001:db8::1/128") == "2001:db8::1", "compact v6 omits /128");
+    CHECK(throne::fast::normalize_cidr_compact("::ffff:192.0.2.5/120") == "192.0.2.0/24", "compact unmaps ipv4-mapped v6");
+    CHECK(throne::fast::normalize_cidr_compact("fe80::1%eth0/64") == "fe80::/64", "compact strips zone");
+    CHECK(throne::fast::normalize_cidr_compact("0.0.0.0/0").empty(), "compact rejects /0");
 
     uint8_t small_buf[4]{};
     size_t out_len = 0;

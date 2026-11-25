@@ -1,10 +1,12 @@
 #include "include/scanner/IpListParse.h"
+#include "include/throne_fast_core.h"
 
 #include <QSet>
 
 #include <algorithm>
 #include <bit>
 #include <iterator>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -246,12 +248,103 @@ namespace Scanner {
             return a.hi != b.hi ? a.hi < b.hi : a.lo < b.lo;
         }
 
+        struct IpListPortKey {
+            uint64_t hash;
+            int port;
+            QString cidr;
+
+            bool operator==(const IpListPortKey &other) const noexcept {
+                return hash == other.hash && port == other.port && cidr == other.cidr;
+            }
+        };
+
+        struct IpListPortKeyHash {
+            size_t operator()(const IpListPortKey &key) const noexcept {
+                return static_cast<size_t>(key.hash);
+            }
+        };
+
+        inline uint64_t ipListPortKeyHash(const QString &cidr, int port) noexcept {
+            return throne_fast_xxhash64(
+                reinterpret_cast<const uint8_t *>(cidr.utf16()),
+                static_cast<size_t>(cidr.size()) * sizeof(char16_t),
+                static_cast<uint64_t>(static_cast<uint32_t>(port)));
+        }
+
+        inline bool ipListParseNormalizeCompactFast(QStringView text, QString &outCidr) {
+            const qsizetype n = text.size();
+            if (n <= 0 || n > 96) return false;
+            char inBuf[96];
+            const QChar *src = text.constData();
+            for (qsizetype i = 0; i < n; ++i) {
+                const char16_t u = src[i].unicode();
+                if (u >= 0x80u) return false;
+                inBuf[i] = static_cast<char>(u);
+            }
+            char outBuf[96];
+            size_t outLen = 0;
+            if (throne_fast_normalize_cidr_compact(
+                    reinterpret_cast<const uint8_t *>(inBuf),
+                    static_cast<size_t>(n),
+                    reinterpret_cast<uint8_t *>(outBuf),
+                    sizeof(outBuf),
+                    &outLen) == 0) {
+                outCidr = QString::fromLatin1(outBuf, static_cast<int>(outLen));
+                return true;
+            }
+            return false;
+        }
+
+        inline void ipListParsePackBe16(const IpListParseAddr &addr, uint8_t out[16]) noexcept {
+            for (int i = 0; i < 16; ++i) out[i] = 0;
+            if (!addr.v6) {
+                const quint32 v = static_cast<quint32>(addr.lo);
+                out[0] = static_cast<uint8_t>(v >> 24);
+                out[1] = static_cast<uint8_t>((v >> 16) & 0xff);
+                out[2] = static_cast<uint8_t>((v >> 8) & 0xff);
+                out[3] = static_cast<uint8_t>(v & 0xff);
+                return;
+            }
+            for (int i = 0; i < 8; ++i) {
+                out[i] = static_cast<uint8_t>((addr.hi >> (56 - 8 * i)) & 0xff);
+                out[8 + i] = static_cast<uint8_t>((addr.lo >> (56 - 8 * i)) & 0xff);
+            }
+        }
+
         // false when the cover would be the whole address space (/0).
         bool ipListParseCoverRange(IpListParseAddr first, const IpListParseAddr &last, QStringList &out) {
             const int bits = ipListParseBits(first);
             const quint64 topHi = first.v6 ? ~0ULL : 0;
             const quint64 topLo = first.v6 ? ~0ULL : 0xffffffffULL;
             if (first.hi == 0 && first.lo == 0 && last.hi == topHi && last.lo == topLo) return false;
+
+            uint8_t startBe16[16];
+            uint8_t endBe16[16];
+            ipListParsePackBe16(first, startBe16);
+            ipListParsePackBe16(last, endBe16);
+            ThroneFastCidr cidrs[260];
+            const int count = throne_fast_cover_range(startBe16, endBe16, first.v6 ? 6 : 4, cidrs, 260);
+            if (count > 0 && count <= 260) {
+                const qsizetype initialSize = out.size();
+                out.reserve(initialSize + count);
+                char fmtBuf[96];
+                for (int i = 0; i < count; ++i) {
+                    size_t fmtLen = 0;
+                    if (throne_fast_format_cidr_compact(
+                            &cidrs[i],
+                            reinterpret_cast<uint8_t *>(fmtBuf),
+                            sizeof(fmtBuf),
+                            &fmtLen) == 0) {
+                        out << QString::fromLatin1(fmtBuf, static_cast<int>(fmtLen));
+                    } else {
+                        out.resize(initialSize);
+                        goto cpp_fallback;
+                    }
+                }
+                return true;
+            }
+
+        cpp_fallback:
             while (true) {
                 int align = first.lo != 0 ? std::countr_zero(first.lo)
                                           : (first.hi != 0 ? 64 + std::countr_zero(first.hi) : 128);
@@ -332,6 +425,11 @@ namespace Scanner {
                 const qsizetype colon = token.indexOf(u':');
                 if (!ipListParsePort(token.mid(colon + 1), port)) return false;
                 network = token.left(colon);
+            }
+            QString normalized;
+            if (ipListParseNormalizeCompactFast(network, normalized)) {
+                cidrs << std::move(normalized);
+                return true;
             }
             IpListParseAddr addr;
             int prefix = 0;
@@ -414,6 +512,10 @@ namespace Scanner {
     } // namespace
 
     QString NormalizeCidr(const QString &text) {
+        QString normalized;
+        if (ipListParseNormalizeCompactFast(QStringView(text).trimmed(), normalized)) {
+            return normalized;
+        }
         IpListParseAddr addr;
         int prefix = 0;
         if (!ipListParseNetwork(text, addr, prefix)) return {};
@@ -427,7 +529,8 @@ namespace Scanner {
         QString content = QString::fromUtf8(text);
         if (content.startsWith(QChar(0xFEFF))) content.remove(0, 1);
 
-        QSet<QString> seen;
+        std::unordered_set<IpListPortKey, IpListPortKeyHash> seen;
+        seen.reserve(static_cast<size_t>(std::clamp<qsizetype>(content.size() / 20, 16, 262144)));
         bool firstContentLine = true;
         bool tabularFile = false;
         int portColumn = -1;
@@ -440,10 +543,8 @@ namespace Scanner {
         const auto add = [&](const QStringList &cidrs, int port) {
             if (port <= 0) port = defaultPort;
             for (const auto &cidr : cidrs) {
-                const QString key = cidr + QLatin1Char(' ') + QString::number(port);
-                const auto before = seen.size();
-                seen.insert(key);
-                if (seen.size() == before) {
+                const uint64_t h = ipListPortKeyHash(cidr, port);
+                if (!seen.emplace(IpListPortKey{h, port, cidr}).second) {
                     ++result.duplicates;
                     continue;
                 }
@@ -596,12 +697,13 @@ namespace Scanner {
         if (defaultPort < 0 || defaultPort > 65535) defaultPort = 0;
         QList<Configs::IpListEntry> entries;
         entries.reserve(cidrs.size());
-        QSet<QString> seen;
-        seen.reserve(cidrs.size());
+        std::unordered_set<IpListPortKey, IpListPortKeyHash> seen;
+        seen.reserve(static_cast<size_t>(cidrs.size()));
         for (const auto &text : cidrs) {
             const QString cidr = NormalizeCidr(text);
-            if (cidr.isEmpty() || seen.contains(cidr)) continue;
-            seen.insert(cidr);
+            if (cidr.isEmpty()) continue;
+            const uint64_t h = ipListPortKeyHash(cidr, 0);
+            if (!seen.emplace(IpListPortKey{h, 0, cidr}).second) continue;
             entries.append({cidr, defaultPort, 0});
         }
         return entries;

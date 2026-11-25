@@ -81,6 +81,85 @@ func TestParseXDNSReplyDifferential(t *testing.T) {
 	qName := dnsmessage.MustNewName("a1b2c3d4e5.xdns.example.com.")
 	q := xdnsQuery{id: 0x3A7F, name: qName}
 
+	wireLabels := func(labels ...string) []byte {
+		var b []byte
+		for _, lbl := range labels {
+			b = append(b, byte(len(lbl)))
+			b = append(b, lbl...)
+		}
+		return append(b, 0)
+	}
+	qWire := wireLabels("a1b2c3d4e5", "xdns", "example", "com")
+	makeQuestionChain := func(hops int, answerFollows bool) []byte {
+		// Header: ID=0x3A7F, Flags=0x8000 (QR=1), QD=1, AN=0 or 1
+		an := byte(0)
+		if answerFollows {
+			an = 1
+		}
+		pkt := []byte{0x3A, 0x7F, 0x80, 0x00, 0x00, 0x01, 0x00, an, 0x00, 0x00, 0x00, 0x00}
+		// Offset 12: pointer to 18 (after QTYPE/QCLASS at 14..17)
+		pkt = append(pkt, 0xC0, 18, 0x00, 16, 0x00, 0x01)
+		// Chain remaining (hops - 1) pointers starting at offset 18
+		for i := 1; i < hops; i++ {
+			nextOff := byte(len(pkt) + 2)
+			pkt = append(pkt, 0xC0, nextOff)
+		}
+		wireOff := len(pkt)
+		pkt = append(pkt, qWire...)
+		if answerFollows {
+			// Answer pointing directly to wireOff, TXT IN TTL=60 RDLEN=1 ""
+			pkt = append(pkt, 0xC0|byte(wireOff>>8), byte(wireOff), 0x00, 16, 0x00, 0x01, 0, 0, 0, 60, 0, 1, 0)
+		}
+		return pkt
+	}
+	makeAnswerWithOtherRecordFirst := func(otherWireName []byte) []byte {
+		// QD=1 (qWire TXT), AN=2 (otherWireName A 1.2.3.4, then qName TXT)
+		pkt := []byte{0x3A, 0x7F, 0x80, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00}
+		pkt = append(pkt, qWire...)
+		pkt = append(pkt, 0x00, 16, 0x00, 0x01)
+		pkt = append(pkt, otherWireName...)
+		pkt = append(pkt, 0x00, 0x01, 0x00, 0x01, 0, 0, 0, 60, 0, 4, 1, 2, 3, 4)
+		pkt = append(pkt, 0xC0, 12, 0x00, 16, 0x00, 0x01, 0, 0, 0, 60, 0, 1, 0)
+		return pkt
+	}
+	makeNameLen := func(targetUnpackedLen int) []byte {
+		// Each label N contributes (N + 1) unpacked bytes including its dot.
+		var labels []string
+		rem := targetUnpackedLen
+		for rem > 0 {
+			chunk := 63
+			if rem-1 < chunk {
+				chunk = rem - 1
+			}
+			lbl := make([]byte, chunk)
+			for i := range lbl {
+				lbl[i] = 'a'
+			}
+			labels = append(labels, string(lbl))
+			rem -= chunk + 1
+		}
+		return wireLabels(labels...)
+	}
+
+	multiQCorruptQ2 := []byte{0x3A, 0x7F, 0x80, 0x00, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00}
+	multiQCorruptQ2 = append(multiQCorruptQ2, qWire...)
+	multiQCorruptQ2 = append(multiQCorruptQ2, 0x00, 16, 0x00, 0x01, 0xC0, 0xFF, 0x00, 16, 0x00, 0x01)
+	multiQCorruptQ2 = append(multiQCorruptQ2, 0xC0, 12, 0x00, 16, 0x00, 0x01, 0, 0, 0, 60, 0, 1, 0)
+
+	ansLoop := []byte{0x3A, 0x7F, 0x80, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00}
+	ansLoop = append(ansLoop, qWire...)
+	ansLoop = append(ansLoop, 0x00, 16, 0x00, 0x01)
+	loopOff := byte(len(ansLoop))
+	ansLoop = append(ansLoop, 0xC0, loopOff, 0x00, 16, 0x00, 0x01, 0, 0, 0, 60, 0, 1, 0)
+
+	truncTxtRdata := []byte{0x3A, 0x7F, 0x80, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00}
+	truncTxtRdata = append(truncTxtRdata, qWire...)
+	truncTxtRdata = append(truncTxtRdata, 0x00, 16, 0x00, 0x01, 0xC0, 12, 0x00, 16, 0x00, 0x01, 0, 0, 0, 60, 0, 5, 1, 'x')
+
+	truncNonTxtRdata := []byte{0x3A, 0x7F, 0x80, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00}
+	truncNonTxtRdata = append(truncNonTxtRdata, qWire...)
+	truncNonTxtRdata = append(truncNonTxtRdata, 0x00, 16, 0x00, 0x01, 0xC0, 12, 0x00, 0x01, 0x00, 0x01, 0, 0, 0, 60, 0, 4, 1, 2)
+
 	cases := []struct {
 		name string
 		pkt  []byte
@@ -96,6 +175,16 @@ func TestParseXDNSReplyDifferential(t *testing.T) {
 		{"mismatched_answer_name", buildTestDNSPacket(0x3A7F, true, dnsmessage.RCodeSuccess, "a1b2c3d4e5.xdns.example.com.", "other.example.com.", true, false)},
 		{"truncated_short", []byte{0x3A, 0x7F, 0x80}},
 		{"compression_loop", []byte{0x3A, 0x7F, 0x80, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0xC0, 12, 0, 16, 0, 1}},
+		{"oob_pointer", []byte{0x3A, 0x7F, 0x80, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0xC0, 0xFF, 0, 16, 0, 1}},
+		{"exactly_10_pointer_hops", makeQuestionChain(10, true)},
+		{"reject_11_pointer_hops", makeQuestionChain(11, true)},
+		{"dot_in_label_answer", makeAnswerWithOtherRecordFirst(wireLabels("a.b", "com"))},
+		{"max_254_byte_name_ok", makeAnswerWithOtherRecordFirst(makeNameLen(254))},
+		{"reject_255_byte_name", makeAnswerWithOtherRecordFirst(makeNameLen(255))},
+		{"multi_question_corrupt_q2", multiQCorruptQ2},
+		{"answer_compression_loop", ansLoop},
+		{"truncated_txt_rdata", truncTxtRdata},
+		{"truncated_non_txt_rdata", truncNonTxtRdata},
 	}
 
 	for _, tc := range cases {

@@ -135,7 +135,8 @@ namespace Stats
     }
 
     static ConnectionMetadata metaFromProto(const libcore::ConnectionMetaData& conn, const QString& localLabel,
-                                            const QHash<QString, QString>& outboundNames, ConnInternMap& intern)
+                                            const QHash<QString, QString>& outboundNames, ConnInternMap& intern,
+                                            QHash<QString, bool>& sourceLocalCache)
     {
         ConnectionMetadata c;
         const auto& idStr = conn.id.value();
@@ -159,7 +160,14 @@ namespace Stats
         c.source = fastIntern(intern, conn.source.value());
         // In tun mode our own traffic enters with the tun's (or this machine's LAN) address, so a loopback-only test would label it a LAN client.
         const QString host = EndpointHost(c.source);
-        c.sourceLocal = host.isEmpty() || LocalNetwork::IsOwnAddress(host);
+        if (host.isEmpty()) {
+            c.sourceLocal = true;
+        } else if (const auto it = sourceLocalCache.constFind(host); it != sourceLocalCache.constEnd()) {
+            c.sourceLocal = *it;
+        } else {
+            c.sourceLocal = LocalNetwork::IsOwnAddress(host);
+            sourceLocalCache.insert(host, c.sourceLocal);
+        }
         c.sourceDisplay = c.sourceLocal ? localLabel : host;
         return c;
     }
@@ -232,6 +240,8 @@ namespace Stats
 
         ConnInternMap intern;
         intern.reserve(64);
+        QHash<QString, bool> sourceLocalCache;
+        sourceLocalCache.reserve(16);
 
         QList<ConnectionMetadata> rows;
         rows.reserve(static_cast<qsizetype>(resp.active.size()));
@@ -240,7 +250,7 @@ namespace Stats
 
         for (const auto& conn : resp.active)
         {
-            auto c = metaFromProto(conn, localLabel, outboundNames, intern);
+            auto c = metaFromProto(conn, localLabel, outboundNames, intern, sourceLocalCache);
 
             SpeedSample s;
             if (const auto it = speedSamples_.constFind(c.id); it != speedSamples_.constEnd())
@@ -330,7 +340,7 @@ namespace Stats
             {
                 const auto& cid = conn.id.value();
                 if (openIds.contains(QString::fromUtf8(cid.data(), static_cast<qsizetype>(cid.size())))) continue;
-                apiRows.append(metaFromProto(conn, localLabel, outboundNames, intern));
+                apiRows.append(metaFromProto(conn, localLabel, outboundNames, intern, sourceLocalCache));
             }
             sortApiSnapshot(apiRows);
             if (apiRows.size() > kSnapshotMaxRows) apiRows.resize(kSnapshotMaxRows);

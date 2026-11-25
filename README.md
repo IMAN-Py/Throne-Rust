@@ -7,6 +7,7 @@
 **High-performance Windows fork of [throneproj/Throne](https://github.com/throneproj/Throne), rebuilt with Qt 6.12.1 and a native Rust (`throne_fast_core.dll`) + `fast-anything` acceleration engine.**
 
 [![Release](https://img.shields.io/github/v/release/IMAN-Py/Throne-Rust?style=flat-square&label=release&color=2F80ED)](https://github.com/IMAN-Py/Throne-Rust/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/IMAN-Py/Throne-Rust/rust-core.yml?branch=main&style=flat-square&label=CI)](https://github.com/IMAN-Py/Throne-Rust/actions/workflows/rust-core.yml)
 [![License](https://img.shields.io/github/license/IMAN-Py/Throne-Rust?style=flat-square&color=6E7781)](LICENSE)
 [![Upstream](https://img.shields.io/badge/upstream-throneproj%2FThrone-1F6FEB?style=flat-square)](https://github.com/throneproj/Throne)
 [![Rust Core](https://img.shields.io/badge/Rust-throne__fast__core%20ABI%202.1-DEA584?style=flat-square&logo=rust)](throne_fast_core/src/lib.rs)
@@ -36,9 +37,9 @@ Download **`Throne-1.4.2-rust-x64-Setup.msi`** from [GitHub Releases](https://gi
 │                             Throne.exe (C++20 / MSVC / Qt 6.12.1)       │
 │  • O(1) std::list LRU + batch prefetch in ProfilesTableModel            │
 │  • Zero-copy SQLite column hydration + idx_profiles_gid index           │
-│  • O(N) ProfileFilter hashing & ConnectionLister string interning       │
-│  • Non-blocking QPointer UpdateDataView w/ xxHash64 render skipping     │
-│  • GroupUpdater raw SHA-256 subscription keying                         │
+│  • O(N) ProfileFilter, IpListParse compact CIDR FFI & IpListsRepo hash  │
+│  • Sequence-ordered non-blocking UpdateDataView w/ xxHash64 render skip │
+│  • CoreElevation staging for throne_fast_core.dll & GroupUpdater SHA256 │
 └───────────────────────────────┬─────────────────────────┬───────────────┘
                                 │ static .dll.lib         │ gRPC / IPC
                                 ▼                         ▼
@@ -49,18 +50,18 @@ Download **`Throne-1.4.2-rust-x64-Setup.msi`** from [GitHub Releases](https://gi
                    │ • 4-bit Arena Trie  │    │ • XDNS TXT wire matcher   │
                    │ • Batch Scan Mixer  │    │ • Ping-pong rule cache    │
                    │ • Zero-alloc DNS    │    │ • No 2ms probe sleep      │
-                   │ • RFC 5952 CIDR/Geo │    │ • LastIndexByte basename  │
+                   │ • Compact CIDR/Geo  │    │ • LastIndexByte basename  │
                    └─────────────────────┘    └───────────────────────────┘
 ```
 
-### Key Measured Results (`i7-12700K`, Windows 11 26H2)
+### Key Measured Results (Windows x64)
 
 See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for methodology, commands, and differential verification suites.
 
 | Workload | Baseline | Throne-Rust | Speedup |
 |---|---:|---:|---:|
-| **IPv4 LPM Routing** (500k lookups, 505 CIDRs) | `310.76 ns/lookup` | **`4.48 ns/lookup`** | **69.31x** |
-| **4 KB Buffer Hashing** (800 MB xxHash64 vs scalar) | `1.10 GB/s` | **`17.21 GB/s`** | **15.69x** |
+| **IPv4 LPM Routing** (500k lookups, 505 CIDRs) | `276.63 ns/lookup` | **`6.53 ns/lookup`** | **42.36x** |
+| **4 KB Buffer Hashing** (800 MB xxHash64 vs scalar) | `1.10 GB/s` | **`17.07 GB/s`** | **15.54x** |
 | **XDNS Wire TXT Reply Match** (Go zero-CGO -> Rust FFI) | `165.9 ns/op` | **`116.1 ns/op`** (0 allocs) | **1.43x** |
 | **Scan Target Batch Permutation** (1,024 shuffled v4+v6 targets) | `27.18 ns/target` | **`22.94 ns/target`** (0 allocs) | **1.185x** |
 | **Batch Probe Latency Stall** (`probe.runBatch`) | `2 ms × N` forced sleep | **0 ms forced sleep** | Eliminated |

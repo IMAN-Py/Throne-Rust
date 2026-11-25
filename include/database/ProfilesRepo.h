@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <map>
+#include <unordered_map>
 #include <QSet>
 #include <QString>
 #include <QJsonObject>
@@ -37,7 +38,9 @@ namespace Configs {
         std::shared_ptr<Profile> profileFromRow(SQLite::Statement& stmt) const;
 
         // Does not touch the identity map.
-        std::map<int, std::shared_ptr<Profile>> loadProfilesByIdsChunk(const QList<int>& ids) const;
+        std::unordered_map<int, std::shared_ptr<Profile>> loadProfilesByIdsChunk(const QList<int>& ids) const;
+
+        friend struct ProfilesRepoTestAccess;
         
         void createTables() const;
 

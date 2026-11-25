@@ -1,6 +1,6 @@
 # Throne-Rust Performance & Profiling Benchmarks
 
-All measurements below were captured natively on **Windows 11 Version 26H2 (x86_64)** on a **12th Gen Intel Core i7-12700K** using `fast-anything v0.7.0`, `go test -bench`, `cargo test --release`, and MSVC 19.51 (`/std:c++20 /O2`) linked against `throne_fast_core.dll` (Rust `1.100.0`, `opt-level = 3`, `lto = "fat"`, `codegen-units = 1`).
+All measurements below were captured natively on **Windows 11 (x86_64)** using `fast-anything`, `go test -bench`, `cargo test --release`, and MSVC (`/std:c++20 /O2`) linked against `throne_fast_core.dll` (`opt-level = 3`, `lto = "fat"`, `codegen-units = 1`).
 
 ---
 
@@ -44,12 +44,12 @@ go test -run=NONE -bench=. -benchmem -benchtime=1s -count=3 ./internal/scan ./in
 
 ## 3. Native C++20 <-> Rust Benchmarks (`tests/cpp_fast_core_test.cpp`)
 
-Compiled with MSVC 19.51 (`/std:c++20 /O2 /EHsc`) against `throne_fast_core.dll.lib`:
+Compiled with MSVC (`/std:c++20 /O2 /EHsc`) against `throne_fast_core.dll.lib`:
 
 | Workload | C++ Scalar Reference | Rust `throne_fast_core.dll` | Throughput / Latency | Speedup |
 |---|---:|---:|---:|---:|
-| **IPv4 LPM Routing** (500,000 lookups, 505 CIDRs `/0`..`/32`) | `155.38 ms` (`310.76 ns/lookup`) | `2.24 ms` (`4.48 ns/lookup`) | ~223M lookups/sec | **69.31x** |
-| **4 KB Buffer Hashing** (200,000 buffers = 800 MB) | `695.55 ms` (`1.10 GB/s`) | `44.34 ms` (`17.21 GB/s`) | **17.21 GB/s** | **15.69x** |
+| **IPv4 LPM Routing** (500,000 lookups, 505 CIDRs `/0`..`/32`) | `138.31 ms` (`276.63 ns/lookup`) | `3.27 ms` (`6.53 ns/lookup`) | ~153M lookups/sec | **42.36x** |
+| **4 KB Buffer Hashing** (200,000 buffers = 800 MB) | `694.80 ms` (`1.10 GB/s`) | `44.70 ms` (`17.07 GB/s`) | **17.07 GB/s** | **15.54x** |
 
 ---
 
@@ -79,6 +79,7 @@ Compiled with MSVC 19.51 (`/std:c++20 /O2 /EHsc`) against `throne_fast_core.dll.
 Every accelerated path has an explicit automated differential test asserting exact parity against the original baseline:
 
 - `TestFastBatchDifferentialEquivalence` (`core/internal/scan/targets_test.go`): Mixed shuffled IPv4 + IPv6 `/32` + multiport + sampled `/16` specs verified bit-for-bit against Go `Targets.At`.
-- `TestParseXDNSReplyDifferential` (`core/internal/scan/dns_test.go`): 11 wire DNS cases (compressed labels, `0x20` randomized case, NXDOMAIN without questions, truncation, self-referential pointer loop guard) verified identically against Go `dnsmessage.Parser`.
-- `cpp_fast_core_test.cpp` (`tests/cpp_fast_core_test.cpp`): 10,000 random + corner IPv4 probes over 505 overlapping CIDRs verified 100% identically against a linear longest-prefix oracle, plus xxHash64/SHA-256 NIST vectors, RFC 5952 CIDR masking, range cover, GeoIP, and domain routing tests.
-- `cargo test --release` (`throne_fast_core`): 14/14 unit tests passing.
+- `TestParseXDNSReplyDifferential` (`core/internal/scan/dns_test.go`): 21 wire DNS cases (compressed labels, `0x20` randomized case, 10-hop/11-hop compression chains, literal dot label rejection, 254/255-byte names, NXDOMAIN without questions, truncation, self-referential pointer loop guards) verified identically against Go `dnsmessage.Parser`.
+- `cpp_fast_core_test.cpp` (`tests/cpp_fast_core_test.cpp`): 10,000 random + corner IPv4 probes over 505 overlapping CIDRs verified 100% identically against a linear longest-prefix oracle, plus xxHash64/SHA-256 NIST vectors, RFC 5952 & compact CIDR masking (`0xFF` all 8 feature flags), range cover, GeoIP, and domain routing tests.
+- `qt_fast_integration_test.cpp` (`tests/qt_fast_integration_test.cpp`): 6/6 QtTest integration checks verifying compact CIDR FFI parity with `Scanner::NormalizeCidr`, IP list range parsing & deduplication, `ProfileFilter` correctness, `ProfilesRepo` batch hydration & `idx_profiles_gid` index, `IpListsRepo` deduplication, and `DataViewHtmlGenerator` sequence ordering.
+- `cargo test --release` (`throne_fast_core`): 16/16 unit tests passing.

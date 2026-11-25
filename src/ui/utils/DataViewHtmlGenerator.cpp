@@ -123,12 +123,19 @@ void DataViewHtmlGenerator::addTestProgress(int count) {
 
 DataViewHtmlGenerator::Content DataViewHtmlGenerator::build() {
     QMutexLocker lk(&mu_);
+    const uint64_t seq = ++nextSeq_;
     for (const auto priority : kPriorityOrder) {
         for (const auto &entry : kItemPriorities) {
-            if (entry.priority == priority && itemVisible(entry.item)) return itemContent(entry.item);
+            if (entry.priority == priority && itemVisible(entry.item)) {
+                auto out = itemContent(entry.item);
+                out.seq = seq;
+                return out;
+            }
         }
     }
-    return {};
+    Content empty;
+    empty.seq = seq;
+    return empty;
 }
 
 bool DataViewHtmlGenerator::itemVisible(DataViewItem item) const {

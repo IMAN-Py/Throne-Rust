@@ -76,6 +76,8 @@ int32_t throne_fast_sha256_hex(const uint8_t* data, size_t len, uint8_t* out64);
 int32_t throne_fast_parse_ip(const uint8_t* input, size_t len, uint8_t* out_family, uint8_t* out_addr16);
 int32_t throne_fast_parse_cidr(const uint8_t* input, size_t len, ThroneFastCidr* out);
 int32_t throne_fast_normalize_cidr(const uint8_t* input, size_t len, uint8_t* out_buf, size_t out_cap, size_t* out_len);
+int32_t throne_fast_normalize_cidr_compact(const uint8_t* input, size_t len, uint8_t* out_buf, size_t out_cap, size_t* out_len);
+int32_t throne_fast_format_cidr_compact(const ThroneFastCidr* cidr, uint8_t* out_buf, size_t out_cap, size_t* out_len);
 int32_t throne_fast_cover_range(const uint8_t* start_be16, const uint8_t* end_be16, uint8_t family, ThroneFastCidr* out_cidrs, size_t max_out);
 
 ThroneFastScanPlan* throne_fast_scan_create(
@@ -161,6 +163,33 @@ inline std::string normalize_cidr(std::string_view sv) {
     if (throne_fast_normalize_cidr(
             reinterpret_cast<const uint8_t*>(sv.data()),
             sv.size(),
+            reinterpret_cast<uint8_t*>(buf),
+            sizeof(buf),
+            &out_len) == 0) {
+        return std::string(buf, out_len);
+    }
+    return {};
+}
+
+inline std::string normalize_cidr_compact(std::string_view sv) {
+    char buf[96];
+    size_t out_len = 0;
+    if (throne_fast_normalize_cidr_compact(
+            reinterpret_cast<const uint8_t*>(sv.data()),
+            sv.size(),
+            reinterpret_cast<uint8_t*>(buf),
+            sizeof(buf),
+            &out_len) == 0) {
+        return std::string(buf, out_len);
+    }
+    return {};
+}
+
+inline std::string format_cidr_compact(const ThroneFastCidr& cidr) {
+    char buf[96];
+    size_t out_len = 0;
+    if (throne_fast_format_cidr_compact(
+            &cidr,
             reinterpret_cast<uint8_t*>(buf),
             sizeof(buf),
             &out_len) == 0) {

@@ -113,6 +113,151 @@ pub fn format_cidr(cidr: &ThroneFastCidr, buf: &mut [u8]) -> Option<usize> {
     Some(cur.position() as usize)
 }
 
+/// Parse a CIDR or bare IP with IP-list semantics:
+/// - allows `[v6]/prefix` or `[v6/prefix]`
+/// - strips optional `%zone` on IPv6 literals
+/// - unmaps `::ffff:w.x.y.z/96..128` to IPv4 `/0..32`
+/// - rejects `/0` prefix length
+pub fn parse_cidr_compact(input: &str) -> Option<ThroneFastCidr> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (body, prefix_part) = if trimmed.starts_with('[') {
+        let close = trimmed.find(']')?;
+        let inner = &trimmed[1..close];
+        let suffix = &trimmed[close + 1..];
+        if !suffix.is_empty() && !suffix.starts_with('/') {
+            return None;
+        }
+        if let Some((ip_p, pre_p)) = inner.split_once('/') {
+            if !suffix.is_empty() {
+                return None;
+            }
+            (ip_p, Some(pre_p))
+        } else if !suffix.is_empty() {
+            (inner, Some(&suffix[1..]))
+        } else {
+            (inner, None)
+        }
+    } else if let Some((ip_p, pre_p)) = trimmed.split_once('/') {
+        (ip_p, Some(pre_p))
+    } else {
+        (trimmed, None)
+    };
+
+    if body.contains(':') {
+        let ip_str = match body.find('%') {
+            Some(zone) => &body[..zone],
+            None => body,
+        };
+        let v6 = Ipv6Addr::from_str(ip_str).ok()?;
+        let mut plen = match prefix_part {
+            Some(p) => parse_u8_strict(p, 128)?,
+            None => 128,
+        };
+        let raw = u128::from(v6);
+        let hi = (raw >> 64) as u64;
+        let lo = raw as u64;
+        if hi == 0 && (lo >> 32) == 0xffff && plen >= 96 {
+            plen -= 96;
+            if plen == 0 {
+                return None;
+            }
+            let mask = !0u32 << (32 - plen);
+            return Some(ThroneFastCidr::from_v4((lo as u32) & mask, plen));
+        }
+        if plen == 0 {
+            return None;
+        }
+        let mask = !0u128 << (128 - plen);
+        Some(ThroneFastCidr::from_v6(raw & mask, plen))
+    } else {
+        let v4 = Ipv4Addr::from_str(body).ok()?;
+        let plen = match prefix_part {
+            Some(p) => parse_u8_strict(p, 32)?,
+            None => 32,
+        };
+        if plen == 0 {
+            return None;
+        }
+        let mask = !0u32 << (32 - plen);
+        Some(ThroneFastCidr::from_v4(u32::from(v4) & mask, plen))
+    }
+}
+
+/// Format CIDR in compact IP-list style:
+/// - pure hex RFC 5952 for IPv6 (always 8 16-bit groups, longest >= 2 zero run as `::`)
+/// - omits `/32` for IPv4 host and `/128` for IPv6 host
+pub fn format_cidr_compact(cidr: &ThroneFastCidr, buf: &mut [u8]) -> Option<usize> {
+    let mut cur = std::io::Cursor::new(buf);
+    match cidr.family {
+        4 => {
+            if cidr.prefix_len > 32 {
+                return None;
+            }
+            let v4 = Ipv4Addr::new(cidr.addr[0], cidr.addr[1], cidr.addr[2], cidr.addr[3]);
+            if cidr.prefix_len == 32 {
+                write!(cur, "{}", v4).ok()?;
+            } else {
+                write!(cur, "{}/{}", v4, cidr.prefix_len).ok()?;
+            }
+        }
+        6 => {
+            if cidr.prefix_len > 128 {
+                return None;
+            }
+            let mut groups = [0u16; 8];
+            for i in 0..8 {
+                groups[i] = u16::from_be_bytes([cidr.addr[i * 2], cidr.addr[i * 2 + 1]]);
+            }
+            let mut best_start: Option<usize> = None;
+            let mut best_len = 1usize;
+            let mut i = 0usize;
+            while i < 8 {
+                if groups[i] != 0 {
+                    i += 1;
+                    continue;
+                }
+                let mut j = i;
+                while j < 8 && groups[j] == 0 {
+                    j += 1;
+                }
+                if j - i > best_len {
+                    best_start = Some(i);
+                    best_len = j - i;
+                }
+                i = j;
+            }
+            let mut wrote_any = false;
+            let mut ends_colon = false;
+            let mut idx = 0usize;
+            while idx < 8 {
+                if Some(idx) == best_start {
+                    cur.write_all(b"::").ok()?;
+                    wrote_any = true;
+                    ends_colon = true;
+                    idx += best_len;
+                    continue;
+                }
+                if wrote_any && !ends_colon {
+                    cur.write_all(b":").ok()?;
+                }
+                write!(cur, "{:x}", groups[idx]).ok()?;
+                wrote_any = true;
+                ends_colon = false;
+                idx += 1;
+            }
+            if cidr.prefix_len < 128 {
+                write!(cur, "/{}", cidr.prefix_len).ok()?;
+            }
+        }
+        _ => return None,
+    }
+    Some(cur.position() as usize)
+}
+
 pub fn cover_range_v4(start: u32, end: u32, out: &mut Vec<ThroneFastCidr>) -> bool {
     if start > end {
         return false;
@@ -307,6 +452,64 @@ pub unsafe extern "C" fn throne_fast_cover_range(
     vec.len() as i32
 }
 
+/// Parse + mask + format a CIDR / bare IP in compact IP-list style:
+/// omits `/32` and `/128`, unmaps `::ffff:w.x.y.z/96..128`, strips `%zone`, rejects `/0`.
+///
+/// # Safety
+/// Caller pointers must be valid for their respective byte lengths.
+#[no_mangle]
+pub unsafe extern "C" fn throne_fast_normalize_cidr_compact(
+    input: *const u8,
+    len: usize,
+    out_buf: *mut u8,
+    out_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if input.is_null() || out_buf.is_null() || out_len.is_null() || len == 0 || out_cap == 0 {
+        return -1;
+    }
+    let bytes = unsafe { slice::from_raw_parts(input, len) };
+    let Ok(s) = str::from_utf8(bytes) else {
+        return -1;
+    };
+    let Some(cidr) = parse_cidr_compact(s) else {
+        return -1;
+    };
+    let out = unsafe { slice::from_raw_parts_mut(out_buf, out_cap) };
+    match format_cidr_compact(&cidr, out) {
+        Some(n) => {
+            unsafe { *out_len = n };
+            0
+        }
+        None => -1,
+    }
+}
+
+/// Format an already-parsed `ThroneFastCidr` in compact IP-list style (omitting `/32` and `/128`).
+///
+/// # Safety
+/// `cidr` readable; `out_buf` writable for `out_cap` bytes; `out_len` writable.
+#[no_mangle]
+pub unsafe extern "C" fn throne_fast_format_cidr_compact(
+    cidr: *const ThroneFastCidr,
+    out_buf: *mut u8,
+    out_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if cidr.is_null() || out_buf.is_null() || out_len.is_null() || out_cap == 0 {
+        return -1;
+    }
+    let c = unsafe { &*cidr };
+    let out = unsafe { slice::from_raw_parts_mut(out_buf, out_cap) };
+    match format_cidr_compact(c, out) {
+        Some(n) => {
+            unsafe { *out_len = n };
+            0
+        }
+        None => -1,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +530,27 @@ mod tests {
         assert!(parse_cidr("10.0.0.5/33").is_none());
         assert!(parse_cidr("10.0.0.5/+24").is_none());
         assert!(parse_cidr("10.0.0.5/24%eth0").is_none());
+    }
+
+    #[test]
+    fn compact_iplist_cidr_parity() {
+        let norm = |s: &str| -> Option<String> {
+            let c = parse_cidr_compact(s)?;
+            let mut buf = [0u8; 64];
+            let n = format_cidr_compact(&c, &mut buf)?;
+            Some(String::from_utf8_lossy(&buf[..n]).into_owned())
+        };
+        assert_eq!(norm("1.2.3.4/32").as_deref(), Some("1.2.3.4"));
+        assert_eq!(norm("192.168.1.99/24").as_deref(), Some("192.168.1.0/24"));
+        assert_eq!(norm("::ffff:192.168.1.99/120").as_deref(), Some("192.168.1.0/24"));
+        assert_eq!(norm("::ffff:1.2.3.4").as_deref(), Some("1.2.3.4"));
+        assert_eq!(norm("fe80::1%eth0").as_deref(), Some("fe80::1"));
+        assert_eq!(norm("[2001:db8::1]/64").as_deref(), Some("2001:db8::/64"));
+        assert_eq!(norm("::ffff:0:0/64").as_deref(), Some("::/64"));
+        assert_eq!(norm("2001:0:0:1::1").as_deref(), Some("2001:0:0:1::1"));
+        assert_eq!(norm("0.0.0.0/0"), None);
+        assert_eq!(norm("::/0"), None);
+        assert_eq!(norm("::ffff:0:0/96"), None);
     }
 
     #[test]

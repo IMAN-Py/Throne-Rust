@@ -152,6 +152,11 @@ namespace Sys::CoreElevation {
             return QDir::toNativeSeparators(QDir::cleanPath(dir)) + "\\libcronet.dll";
         }
 
+        // Go core also loads optional throne_fast_core.dll from its own executable directory.
+        QString coreElevationFastCoreIn(const QString &dir) {
+            return QDir::toNativeSeparators(QDir::cleanPath(dir)) + "\\throne_fast_core.dll";
+        }
+
         Status coreElevationEvaluate() {
             const CoreElevationInstall install = coreElevationLocalInstall(coreElevationUserSid());
             if (install.grantDir.isEmpty()) return Status::NotGranted;
@@ -166,11 +171,16 @@ namespace Sys::CoreElevation {
             qint64 cronetSize = -1;
             qint64 cronetMtime = -1;
             const bool cronet = coreElevationStamp(coreElevationCronetIn(QFileInfo(install.core).absolutePath()), &cronetSize, &cronetMtime);
+            qint64 fastCoreSize = -1;
+            qint64 fastCoreMtime = -1;
+            const bool fastCore = coreElevationStamp(coreElevationFastCoreIn(QFileInfo(install.core).absolutePath()), &fastCoreSize, &fastCoreMtime);
             const bool current = coreElevationExists(install.grantDir + "\\ThroneCore.exe") && coreElevationStamp(install.core, &size, &mtime)
                 && record.value("size").toInteger(-1) == size && record.value("mtime").toInteger(-1) == mtime
                 && record.value("core").toString().compare(install.core, Qt::CaseInsensitive) == 0
                 && record.value("cronet_size").toInteger(-1) == cronetSize && record.value("cronet_mtime").toInteger(-1) == cronetMtime
-                && (!cronet || coreElevationExists(coreElevationCronetIn(install.grantDir)));
+                && (!cronet || coreElevationExists(coreElevationCronetIn(install.grantDir)))
+                && record.value("fastcore_size").toInteger(-1) == fastCoreSize && record.value("fastcore_mtime").toInteger(-1) == fastCoreMtime
+                && (!fastCore || coreElevationExists(coreElevationFastCoreIn(install.grantDir)));
             return current ? Status::Granted : Status::Stale;
         }
 
@@ -332,6 +342,17 @@ namespace Sys::CoreElevation {
                 if (cronet.size() != cronetSize) return HelperCopyFailed;
             }
 
+            const QString fastCoreSource = coreElevationFastCoreIn(QFileInfo(install.core).absolutePath());
+            qint64 fastCoreSize = -1;
+            qint64 fastCoreMtime = -1;
+            QByteArray fastCore;
+            if (coreElevationStamp(fastCoreSource, &fastCoreSize, &fastCoreMtime)) {
+                QFile library(fastCoreSource);
+                if (!library.open(QIODevice::ReadOnly)) return HelperCopyFailed;
+                fastCore = library.readAll();
+                if (fastCore.size() != fastCoreSize) return HelperCopyFailed;
+            }
+
             for (const QString &name : QDir(install.grantDir).entryList({"*.old", "*.tmp"}, QDir::Files | QDir::Hidden | QDir::System)) {
                 DeleteFileW(qUtf16Printable(install.grantDir + "\\" + name));
             }
@@ -341,6 +362,12 @@ namespace Sys::CoreElevation {
                 if (!coreElevationPlace(cronetTarget, cronet)) return HelperCopyFailed;
             } else {
                 DeleteFileW(qUtf16Printable(cronetTarget));
+            }
+            const QString fastCoreTarget = coreElevationFastCoreIn(install.grantDir);
+            if (fastCoreSize >= 0) {
+                if (!coreElevationPlace(fastCoreTarget, fastCore)) return HelperCopyFailed;
+            } else {
+                DeleteFileW(qUtf16Printable(fastCoreTarget));
             }
 
             QJsonObject record{
@@ -354,6 +381,10 @@ namespace Sys::CoreElevation {
             if (cronetSize >= 0) {
                 record.insert("cronet_size", cronetSize);
                 record.insert("cronet_mtime", cronetMtime);
+            }
+            if (fastCoreSize >= 0) {
+                record.insert("fastcore_size", fastCoreSize);
+                record.insert("fastcore_mtime", fastCoreMtime);
             }
             if (!coreElevationWriteFile(install.grantDir + "\\grant.json", QJsonDocument(record).toJson(QJsonDocument::Compact))) {
                 return HelperCopyFailed;

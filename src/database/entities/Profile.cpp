@@ -123,10 +123,10 @@ namespace Configs
     namespace {
         struct FastProfileKey {
             uint64_t hash;
-            QByteArray bytes;
+            QString key;
 
             bool operator==(const FastProfileKey &other) const noexcept {
-                return hash == other.hash && bytes == other.bytes;
+                return hash == other.hash && key == other.key;
             }
         };
 
@@ -136,13 +136,12 @@ namespace Configs
             }
         };
 
-        inline FastProfileKey makeFastKey(const QString &keyStr) {
-            QByteArray utf8 = keyStr.toUtf8();
+        inline FastProfileKey makeFastKey(QString keyStr) {
             const uint64_t h = throne_fast_xxhash64(
-                reinterpret_cast<const uint8_t*>(utf8.constData()),
-                static_cast<size_t>(utf8.size()),
+                reinterpret_cast<const uint8_t*>(keyStr.utf16()),
+                static_cast<size_t>(keyStr.size()) * sizeof(char16_t),
                 0);
-            return FastProfileKey{h, std::move(utf8)};
+            return FastProfileKey{h, std::move(keyStr)};
         }
     }
 

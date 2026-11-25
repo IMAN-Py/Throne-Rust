@@ -996,6 +996,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 }
 
 MainWindow::~MainWindow() {
+    if (m_dataViewAlive) m_dataViewAlive->store(false, std::memory_order_release);
     if (auto *h = Engine::host()) h->detachFrontEnd();
     SetUserLogSink({});
     SetDialogMessageSink({});

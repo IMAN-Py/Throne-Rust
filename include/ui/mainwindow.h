@@ -15,7 +15,9 @@
 #endif
 
 #include <array>
+#include <atomic>
 #include <deque>
+#include <memory>
 #include <optional>
 #include <QKeyEvent>
 #include "include/ui/widget/TrayIcon.hpp"
@@ -317,8 +319,13 @@ private:
     class RuntimeStatsWidget *runtimeStatsWidget = nullptr;
     std::atomic<qint64> lastUpdatedMs = QDateTime::currentMSecsSinceEpoch();
     DataViewHtmlGenerator dataViewHtmlGenerator_;
+    std::shared_ptr<std::atomic<bool>> m_dataViewAlive = std::make_shared<std::atomic<bool>>(true);
+    uint64_t m_appliedDataViewSeq = 0;
     uint64_t m_lastDataViewHtmlHash = 0;
     uint64_t m_lastDataViewTipHash = 0;
+    qsizetype m_lastDataViewHtmlLen = -1;
+    qsizetype m_lastDataViewTipLen = -1;
+    bool m_hasDataViewSnapshot = false;
 
     QList<QShortcut*> hiddenMenuShortcuts;
     GlobalHotkeys *globalHotkeys = nullptr;
