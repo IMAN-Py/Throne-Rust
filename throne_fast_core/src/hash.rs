@@ -165,9 +165,14 @@ const SHA256_K: [u32; 64] = [
 #[inline]
 fn sha256_compress(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut w = [0u32; 64];
-    for i in 0..16 {
+    for (i, word) in w.iter_mut().enumerate().take(16) {
         let base = i * 4;
-        w[i] = u32::from_be_bytes([block[base], block[base + 1], block[base + 2], block[base + 3]]);
+        *word = u32::from_be_bytes([
+            block[base],
+            block[base + 1],
+            block[base + 2],
+            block[base + 3],
+        ]);
     }
     for i in 16..64 {
         let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -213,8 +218,8 @@ fn sha256_compress(state: &mut [u32; 8], block: &[u8; 64]) {
 
 pub fn sha256_raw(data: &[u8]) -> [u8; 32] {
     let mut state: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
 
     let mut offset = 0usize;

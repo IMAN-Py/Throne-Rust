@@ -1,0 +1,168 @@
+name: Windows Release & MSI Installer
+
+on:
+  push:
+    tags:
+      - 'v*-rust*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.4.2-rust.3)"
+        required: true
+      msi_version:
+        description: "4-part Windows MSI version (e.g. 1.4.2.3)"
+        required: true
+        default: "1.4.2.3"
+      publish_release:
+        description: "Upload MSI & SHA256SUMS.txt to GitHub Release"
+        type: boolean
+        default: false
+
+env:
+  QT_VERSION: "6.12.1"
+  PROTOC_VERSION: "36.2"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache Qt 6.12.1 and OpenSSL
+        id: cache-win-deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            _ci_deps/qt.7z
+            _ci_deps/openssl.7z
+          key: win-qt-${{ env.QT_VERSION }}-amd64
+
+      - name: Download Qt 6.12.1, OpenSSL, Dashboard, srslist.h, and protoc
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force _ci_deps | Out-Null
+          if (-not (Test-Path _ci_deps/qt.7z)) {
+            Invoke-WebRequest "https://github.com/throneproj/buildqt/releases/download/Qt_$env:QT_VERSION/Qt_${env:QT_VERSION}_amd64.7z" -OutFile _ci_deps/qt.7z
+          }
+          if (-not (Test-Path _ci_deps/openssl.7z)) {
+            Invoke-WebRequest "https://github.com/throneproj/env_windows_legacy/releases/download/latest/openssl_amd64.7z" -OutFile _ci_deps/openssl.7z
+          }
+          7z x _ci_deps/qt.7z -o_ci_deps | Out-Null
+          7z x _ci_deps/openssl.7z -o_ci_deps | Out-Null
+          Invoke-WebRequest "https://raw.githubusercontent.com/throneproj/routeprofiles/rule-set/srslist.h" -OutFile _ci_deps/srslist.h
+          Invoke-WebRequest "https://github.com/throneproj/updater/releases/latest/download/updater-windows-x64.exe" -OutFile _ci_deps/updater.exe
+          Invoke-WebRequest "https://github.com/protocolbuffers/protobuf/releases/download/v$env:PROTOC_VERSION/protoc-$env:PROTOC_VERSION-win64.zip" -OutFile _ci_deps/protoc.zip
+          Expand-Archive _ci_deps/protoc.zip -DestinationPath _ci_deps/protoc -Force
+          git clone --depth 1 https://github.com/throneproj/dashboard.git _ci_deps/dashboard-src
+          New-Item -ItemType Directory -Force res/dashboard | Out-Null
+          Copy-Item "_ci_deps/dashboard-src/*" res/dashboard -Recurse -Force
+          Remove-Item -Recurse -Force res/dashboard/.git -ErrorAction SilentlyContinue
+
+      - name: Build & test throne_fast_core.dll
+        shell: pwsh
+        run: |
+          cd throne_fast_core
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --release
+          cargo build --release
+
+      - name: Generate protobufs, test Go core, and build ThroneCore.exe + libcronet.dll
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\_ci_deps\protoc\bin;$(go env GOPATH)\bin;$env:PATH"
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+          Push-Location core\gen
+          protoc -I . --go_out=. --go-grpc_out=. libcore.proto
+          Pop-Location
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:THRONE_FAST_CORE_DLL = "$PWD\throne_fast_core\target\release\throne_fast_core.dll"
+          Push-Location core
+          go vet ./internal/fastcore ./internal/probe ./internal/rpc ./internal/scan
+          go test -count=1 ./internal/fastcore ./internal/probe ./internal/rpc ./internal/scan
+          $ver = (go list -m -f '{{.Version}}' github.com/sagernet/sing-box)
+          $tags = "with_clash_api,with_quic,with_wireguard,with_utls,with_dhcp,with_tailscale,with_openvpn,with_openconnect,badlinkname,tfogo_checklinkname0,with_purego,with_naive_outbound"
+          New-Item -ItemType Directory -Force "$PWD\..\build" | Out-Null
+          go build -v -o "$PWD\..\build\ThroneCore.exe" -trimpath -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=$ver' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0" -tags $tags .
+          $cronetMod = "github.com/sagernet/cronet-go/lib/windows_amd64"
+          go mod download $cronetMod
+          $cronetDir = (go list -m -f '{{.Dir}}' $cronetMod)
+          Copy-Item "$cronetDir\libcronet.dll" "$PWD\..\_ci_deps\libcronet.dll" -Force
+          Pop-Location
+
+      - name: Build Throne.exe (Qt 6.12.1 + Rust) and run integration & smoke tests
+        shell: pwsh
+        run: |
+          $env:CMAKE_PREFIX_PATH = "$PWD\_ci_deps\Qt\lib\cmake"
+          $env:OPENSSL_ROOT_DIR = "$PWD\_ci_deps\openssl"
+          $verTag = if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith("v")) { $env:GITHUB_REF_NAME.TrimStart("v") } else { "1.4.2-rust" }
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_THRONE_FAST_CORE=ON -DINPUT_VERSION="$verTag"
+          Copy-Item _ci_deps/srslist.h build/srslist.h -Force
+          cmake --build build --parallel
+          cmake -B _ci_deps/tests_build -S tests -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build _ci_deps/tests_build --parallel
+          .\_ci_deps\tests_build\cpp_fast_core_test.exe
+          .\_ci_deps\tests_build\qt_fast_integration_test.exe
+          .\build\Throne.exe --headless --version
+
+      - name: Package WiX v5 MSI installer & SHA256SUMS.txt
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.*
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          wix extension add -g WixToolset.UI.wixext
+          $msiVer = if ("${{ inputs.msi_version }}") { "${{ inputs.msi_version }}" } else { "1.4.2.3" }
+          .\installer\build-msi.ps1 `
+            -ThroneExe "$PWD\build\Throne.exe" `
+            -ThroneCoreExe "$PWD\build\ThroneCore.exe" `
+            -RustDll "$PWD\throne_fast_core\target\release\throne_fast_core.dll" `
+            -UpdaterExe "$PWD\_ci_deps\updater.exe" `
+            -CronetDll "$PWD\_ci_deps\libcronet.dll" `
+            -DashboardDir "$PWD\res\dashboard" `
+            -Version $msiVer `
+            -OutMsi "$PWD\installer\Throne-1.4.2-rust-x64-Setup.msi"
+          $msiHash = (Get-FileHash "$PWD\installer\Throne-1.4.2-rust-x64-Setup.msi" -Algorithm SHA256).Hash.ToLower()
+          $lines = @("$msiHash  Throne-1.4.2-rust-x64-Setup.msi")
+          foreach ($f in @("Throne.exe", "ThroneCore.exe", "throne_fast_core.dll", "libcronet.dll", "updater.exe")) {
+            $h = (Get-FileHash "$PWD\installer\stage\$f" -Algorithm SHA256).Hash.ToLower()
+            $lines += "$h  $f"
+          }
+          $lines | Set-Content -Path "$PWD\installer\SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload MSI & Checksums Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Throne-Rust-Windows-x64-MSI
+          path: |
+            installer/Throne-1.4.2-rust-x64-Setup.msi
+            installer/SHA256SUMS.txt
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = if ((Test-Path env:GITHUB_REF_NAME) -and ($env:GITHUB_REF_TYPE -eq 'tag')) { $env:GITHUB_REF_NAME } else { "${{ inputs.tag }}" }
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag installer/Throne-1.4.2-rust-x64-Setup.msi installer/SHA256SUMS.txt --title "Throne-Rust $tag (Windows x64 + MSI Installer)" --generate-notes
+          } else {
+            gh release upload $tag installer/Throne-1.4.2-rust-x64-Setup.msi installer/SHA256SUMS.txt --clobber
+          }

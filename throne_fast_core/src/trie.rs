@@ -373,13 +373,22 @@ mod tests {
         assert!(t.insert_cidr("2001:db8::/32", 1));
         assert!(t.insert_cidr("2001:db8:1::/48", 2));
         let ip1 = u128::from_be_bytes(
-            "2001:db8:1::5".parse::<std::net::Ipv6Addr>().unwrap().octets(),
+            "2001:db8:1::5"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .octets(),
         );
         let ip2 = u128::from_be_bytes(
-            "2001:db8:2::5".parse::<std::net::Ipv6Addr>().unwrap().octets(),
+            "2001:db8:2::5"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .octets(),
         );
         let ip3 = u128::from_be_bytes(
-            "2606:4700::1".parse::<std::net::Ipv6Addr>().unwrap().octets(),
+            "2606:4700::1"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .octets(),
         );
         assert_eq!(t.match_v6(ip1), 2);
         assert_eq!(t.match_v6(ip2), 1);

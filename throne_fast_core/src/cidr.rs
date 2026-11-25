@@ -58,7 +58,11 @@ pub fn parse_cidr(input: &str) -> Option<ThroneFastCidr> {
                 Some(p) => parse_u8_strict(p, 32)?,
                 None => 32,
             };
-            let mask = if plen == 0 { 0u32 } else { !0u32 << (32 - plen) };
+            let mask = if plen == 0 {
+                0u32
+            } else {
+                !0u32 << (32 - plen)
+            };
             let masked = u32::from(v4) & mask;
             Some(ThroneFastCidr::from_v4(masked, plen))
         }
@@ -542,7 +546,10 @@ mod tests {
         };
         assert_eq!(norm("1.2.3.4/32").as_deref(), Some("1.2.3.4"));
         assert_eq!(norm("192.168.1.99/24").as_deref(), Some("192.168.1.0/24"));
-        assert_eq!(norm("::ffff:192.168.1.99/120").as_deref(), Some("192.168.1.0/24"));
+        assert_eq!(
+            norm("::ffff:192.168.1.99/120").as_deref(),
+            Some("192.168.1.0/24")
+        );
         assert_eq!(norm("::ffff:1.2.3.4").as_deref(), Some("1.2.3.4"));
         assert_eq!(norm("fe80::1%eth0").as_deref(), Some("fe80::1"));
         assert_eq!(norm("[2001:db8::1]/64").as_deref(), Some("2001:db8::/64"));

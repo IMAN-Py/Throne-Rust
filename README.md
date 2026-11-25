@@ -38,8 +38,8 @@
 
 | Workload | Upstream / Scalar Baseline | Throne-Rust (`throne_fast_core.dll`) | Measured Gain |
 |---|---:|---:|---:|
-| **IPv4 LPM Routing** (500k lookups, 505 CIDRs) | `276.63 ns/lookup` | **`6.53 ns/lookup`** | **42.36x faster** |
-| **4 KB Buffer Hashing** (800 MB xxHash64) | `1.10 GB/s` | **`17.07 GB/s`** | **15.54x faster** |
+| **IPv4 LPM Routing** (500k lookups, 505 CIDRs) | `283.00 ns/lookup` | **`4.25 ns/lookup`** | **66.62x faster** |
+| **4 KB Buffer Hashing** (800 MB xxHash64) | `1.11 GB/s` | **`16.82 GB/s`** | **15.09x faster** |
 | **XDNS Wire TXT Reply Match** (Go zero-CGO -> Rust FFI) | `165.9 ns/op` | **`116.1 ns/op`** (0 allocs) | **1.43x faster** |
 | **Scan Target Batch Permutation** (1,024 v4+v6 targets) | `27.18 ns/target` | **`22.94 ns/target`** (0 allocs) | **1.185x faster** |
 | **Batch Outbound Probing** (`probe.runBatch`) | `2 ms × N` forced sleep | **0 ms forced sleep** | Eliminated |
@@ -49,12 +49,16 @@
 
 ## Windows Installation (MSI)
 
-Download **`Throne-1.4.2-rust-x64-Setup.msi`** from [GitHub Releases](https://github.com/IMAN-Py/Throne-Rust/releases/latest) or fetch & verify directly from PowerShell:
+Download **`Throne-1.4.2-rust-x64-Setup.msi`** from [GitHub Releases](https://github.com/IMAN-Py/Throne-Rust/releases/latest), or install with automatic SHA-256 verification via PowerShell or [Scoop](https://scoop.sh/):
 
 ```powershell
-Invoke-WebRequest "https://github.com/IMAN-Py/Throne-Rust/releases/latest/download/Throne-1.4.2-rust-x64-Setup.msi" -OutFile "Throne-1.4.2-rust-x64-Setup.msi"
-Get-FileHash .\Throne-1.4.2-rust-x64-Setup.msi -Algorithm SHA256
-msiexec /i .\Throne-1.4.2-rust-x64-Setup.msi
+# Verified one-line installer (downloads latest MSI + SHA256SUMS.txt, verifies hash, runs msiexec)
+irm https://raw.githubusercontent.com/IMAN-Py/Throne-Rust/main/installer/install.ps1 | iex
+```
+
+```powershell
+# Or install via Scoop manifest
+scoop install https://raw.githubusercontent.com/IMAN-Py/Throne-Rust/main/scoop/throne-rust.json
 ```
 
 ### What the WiX v5 Installer Includes

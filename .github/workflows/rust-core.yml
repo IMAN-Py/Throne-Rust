@@ -10,6 +10,7 @@ on:
       - 'tests/**'
       - 'core/**'
       - 'installer/**'
+      - 'scoop/**'
       - '.github/workflows/rust-core.yml'
   pull_request:
     branches: [ main, dev ]
@@ -25,6 +26,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - uses: actions/setup-go@v5
         with:
@@ -52,10 +55,12 @@ jobs:
           protoc -I . --go_out=. --go-grpc_out=. libcore.proto
           Pop-Location
 
-      - name: Build and test Rust crate (throne_fast_core)
+      - name: Format, lint, test, and build Rust crate (throne_fast_core)
         shell: pwsh
         run: |
           cd throne_fast_core
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
           cargo test --release -- --nocapture
           cargo build --release
 
@@ -69,12 +74,13 @@ jobs:
           cl.exe /nologo /std:c++20 /O2 /EHsc /Iinclude tests\cpp_fast_core_test.cpp /Fe:tests\bin\cpp_fast_core_test.exe /link $lib
           .\tests\bin\cpp_fast_core_test.exe
 
-      - name: Run Go unit & differential tests against throne_fast_core.dll
+      - name: Run Go vet & differential tests against throne_fast_core.dll
         shell: pwsh
         run: |
           $env:CGO_ENABLED = "0"
           $env:THRONE_FAST_CORE_DLL = "$PWD\throne_fast_core\target\release\throne_fast_core.dll"
           cd core
+          go vet ./internal/fastcore ./internal/probe ./internal/rpc ./internal/scan
           go test -count=1 -v ./internal/fastcore ./internal/probe ./internal/rpc ./internal/scan
 
       - name: Engine/UI boundary check

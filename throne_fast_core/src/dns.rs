@@ -23,7 +23,11 @@ fn read_be16(pkt: &[u8], off: usize) -> Option<u16> {
 /// Unpack a wire-format DNS name (RFC 1035 with bounded compression pointers) into `out_buf`.
 /// Returns `(decoded_len, next_wire_offset_after_name)` on success.
 /// Canonical format matches `dnsmessage.Name`: labels separated by `.` ending with `.`.
-pub fn unpack_dns_name(pkt: &[u8], start: usize, out_buf: &mut [u8; 256]) -> Option<(usize, usize)> {
+pub fn unpack_dns_name(
+    pkt: &[u8],
+    start: usize,
+    out_buf: &mut [u8; 256],
+) -> Option<(usize, usize)> {
     let mut cur = start;
     let mut jumped = false;
     let mut return_off = 0usize;
@@ -135,7 +139,11 @@ fn skip_dns_name(pkt: &[u8], start: usize) -> Option<usize> {
     }
 }
 
-pub fn match_xdns_reply(pkt: &[u8], expected_id: u16, expected_name: &[u8]) -> ThroneFastXdnsResult {
+pub fn match_xdns_reply(
+    pkt: &[u8],
+    expected_id: u16,
+    expected_name: &[u8],
+) -> ThroneFastXdnsResult {
     let miss = ThroneFastXdnsResult {
         matched: 0,
         rcode: 0,
@@ -327,14 +335,20 @@ mod tests {
         p.extend_from_slice(&(if with_txt { 1u16 } else { 0u16 }).to_be_bytes());
         p.extend_from_slice(&0u32.to_be_bytes());
         // QNAME at offset 12: 3abc7example3com0
-        p.extend_from_slice(&[3, b'a', b'b', b'c', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0]);
+        p.extend_from_slice(&[
+            3, b'a', b'b', b'c', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm',
+            0,
+        ]);
         p.extend_from_slice(&DNS_TYPE_TXT.to_be_bytes());
         p.extend_from_slice(&DNS_CLASS_IN.to_be_bytes());
         if with_txt {
             if compressed_answer {
                 p.extend_from_slice(&[0xC0, 12]);
             } else {
-                p.extend_from_slice(&[3, b'A', b'B', b'C', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0]);
+                p.extend_from_slice(&[
+                    3, b'A', b'B', b'C', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c',
+                    b'o', b'm', 0,
+                ]);
             }
             p.extend_from_slice(&DNS_TYPE_TXT.to_be_bytes());
             p.extend_from_slice(&DNS_CLASS_IN.to_be_bytes());
@@ -371,22 +385,34 @@ mod tests {
         bad[17] = 1;
         let r = match_xdns_reply(&bad, 0x1234, b"a.com.");
         assert_eq!(r.matched, 0);
-        assert_eq!(unsafe { throne_fast_dns_validate_packet(bad.as_ptr(), bad.len()) }, 0);
+        assert_eq!(
+            unsafe { throne_fast_dns_validate_packet(bad.as_ptr(), bad.len()) },
+            0
+        );
 
         // Out-of-bounds compression pointer
         let mut oob = bad.clone();
         oob[13] = 200;
-        assert_eq!(unsafe { throne_fast_dns_validate_packet(oob.as_ptr(), oob.len()) }, 0);
+        assert_eq!(
+            unsafe { throne_fast_dns_validate_packet(oob.as_ptr(), oob.len()) },
+            0
+        );
 
         // Valid compressed packet must validate as 1
         let ok = sample_xdns_reply(0x4242, 0, true, true);
-        assert_eq!(unsafe { throne_fast_dns_validate_packet(ok.as_ptr(), ok.len()) }, 1);
+        assert_eq!(
+            unsafe { throne_fast_dns_validate_packet(ok.as_ptr(), ok.len()) },
+            1
+        );
 
         // Label containing literal '.' must be rejected (matches Go dnsmessage)
         let mut dot_label = vec![0x12, 0x34, 0x80, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
         dot_label.extend_from_slice(&[3, b'a', b'.', b'b', 0, 0, 16, 0, 1]);
         assert_eq!(match_xdns_reply(&dot_label, 0x1234, b"a.b.").matched, 0);
-        assert_eq!(unsafe { throne_fast_dns_validate_packet(dot_label.as_ptr(), dot_label.len()) }, 0);
+        assert_eq!(
+            unsafe { throne_fast_dns_validate_packet(dot_label.as_ptr(), dot_label.len()) },
+            0
+        );
     }
 
     #[test]

@@ -292,8 +292,8 @@ impl ThroneFastScanPlan {
         } else {
             0
         };
-        for i in 0..count {
-            out[i] = self.target_at_with_hint(start_pos + i as u64, &mut range_hint);
+        for (i, slot) in out.iter_mut().enumerate().take(count) {
+            *slot = self.target_at_with_hint(start_pos + i as u64, &mut range_hint);
         }
         count
     }

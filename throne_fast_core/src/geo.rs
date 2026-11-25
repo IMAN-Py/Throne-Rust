@@ -72,8 +72,10 @@ impl ThroneFastGeoIndex {
     }
 }
 
+/// # Safety
+/// When `count > 0` and `ranges` is non-null, `ranges` must point to `count` valid initialized `ThroneFastGeoRange` elements.
 #[no_mangle]
-pub extern "C" fn throne_fast_geo_create(
+pub unsafe extern "C" fn throne_fast_geo_create(
     ranges: *const ThroneFastGeoRange,
     count: usize,
 ) -> *mut ThroneFastGeoIndex {
@@ -121,9 +123,24 @@ mod tests {
     #[test]
     fn geo_sorted_coalesced_lookup() {
         let ranges = [
-            ThroneFastGeoRange { start: 100, end: 200, country: *b"US", _pad: [0; 2] },
-            ThroneFastGeoRange { start: 201, end: 300, country: *b"US", _pad: [0; 2] },
-            ThroneFastGeoRange { start: 250, end: 350, country: *b"DE", _pad: [0; 2] },
+            ThroneFastGeoRange {
+                start: 100,
+                end: 200,
+                country: *b"US",
+                _pad: [0; 2],
+            },
+            ThroneFastGeoRange {
+                start: 201,
+                end: 300,
+                country: *b"US",
+                _pad: [0; 2],
+            },
+            ThroneFastGeoRange {
+                start: 250,
+                end: 350,
+                country: *b"DE",
+                _pad: [0; 2],
+            },
         ];
         let idx = ThroneFastGeoIndex::from_ranges(&ranges);
         assert_eq!(idx.lookup(99), [0, 0]);

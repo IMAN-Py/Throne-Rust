@@ -1,0 +1,36 @@
+{
+    "version": "1.4.2-rust.3",
+    "description": "Fast Windows GUI proxy & VPN client (sing-box + Xray) accelerated with a native Rust core (throne_fast_core.dll)",
+    "homepage": "https://github.com/IMAN-Py/Throne-Rust",
+    "license": "GPL-3.0-only",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/IMAN-Py/Throne-Rust/releases/download/v1.4.2-rust.3/Throne-1.4.2-rust-x64-Setup.msi",
+            "hash": "dbf7799815bfbdea18a63c816cbfbe25d17237a5a406caaf8429e5547eae29fa",
+            "extract_dir": "PFiles64\\Throne-Rust"
+        }
+    },
+    "bin": "Throne.exe",
+    "shortcuts": [
+        [
+            "Throne.exe",
+            "Throne-Rust"
+        ]
+    ],
+    "persist": "config",
+    "checkver": {
+        "url": "https://api.github.com/repos/IMAN-Py/Throne-Rust/releases/latest",
+        "jsonpath": "$.tag_name",
+        "regex": "v([\\d.]+-rust(?:\\.\\d+)?)"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/IMAN-Py/Throne-Rust/releases/download/v$version/Throne-1.4.2-rust-x64-Setup.msi"
+            }
+        },
+        "hash": {
+            "url": "https://github.com/IMAN-Py/Throne-Rust/releases/download/v$version/SHA256SUMS.txt"
+        }
+    }
+}
