@@ -10,9 +10,9 @@ on:
         description: "Release tag (e.g. v1.4.2-rust.3)"
         required: true
       msi_version:
-        description: "4-part Windows MSI version (e.g. 1.4.2.3)"
+        description: "4-part Windows MSI version (e.g. 1.4.2.5)"
         required: true
-        default: "1.4.2.3"
+        default: "1.4.2.5"
       publish_release:
         description: "Upload MSI & SHA256SUMS.txt to GitHub Release"
         type: boolean
@@ -49,64 +49,73 @@ jobs:
           path: |
             _ci_deps/qt.7z
             _ci_deps/openssl.7z
-          key: win-qt-${{ env.QT_VERSION }}-amd64
+          key: win-qt-${{ env.QT_VERSION }}-x64
 
       - name: Download Qt 6.12.1, OpenSSL, Dashboard, srslist.h, and protoc
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          function Assert-Ok([string]$msg) { if ($LASTEXITCODE -ne 0) { throw "$msg (exit $LASTEXITCODE)" } }
           New-Item -ItemType Directory -Force _ci_deps | Out-Null
           if (-not (Test-Path _ci_deps/qt.7z)) {
-            Invoke-WebRequest "https://github.com/throneproj/buildqt/releases/download/Qt_$env:QT_VERSION/Qt_${env:QT_VERSION}_amd64.7z" -OutFile _ci_deps/qt.7z
+            curl.exe -fsSL -o _ci_deps/qt.7z "https://github.com/throneproj/buildqt/releases/download/Qt_$env:QT_VERSION/Qt_${env:QT_VERSION}_x64.7z"
+            Assert-Ok "Download Qt archive failed"
           }
           if (-not (Test-Path _ci_deps/openssl.7z)) {
-            Invoke-WebRequest "https://github.com/throneproj/env_windows_legacy/releases/download/latest/openssl_amd64.7z" -OutFile _ci_deps/openssl.7z
+            curl.exe -fsSL -o _ci_deps/openssl.7z "https://github.com/throneproj/env_windows_legacy/releases/download/latest/openssl_x64.7z"
+            Assert-Ok "Download OpenSSL archive failed"
           }
-          7z x _ci_deps/qt.7z -o_ci_deps | Out-Null
-          7z x _ci_deps/openssl.7z -o_ci_deps | Out-Null
-          Invoke-WebRequest "https://raw.githubusercontent.com/throneproj/routeprofiles/rule-set/srslist.h" -OutFile _ci_deps/srslist.h
-          Invoke-WebRequest "https://github.com/throneproj/updater/releases/latest/download/updater-windows-x64.exe" -OutFile _ci_deps/updater.exe
-          Invoke-WebRequest "https://github.com/protocolbuffers/protobuf/releases/download/v$env:PROTOC_VERSION/protoc-$env:PROTOC_VERSION-win64.zip" -OutFile _ci_deps/protoc.zip
+          7z x -y _ci_deps/qt.7z -o_ci_deps | Out-Null; Assert-Ok "Extract Qt archive failed"
+          7z x -y _ci_deps/openssl.7z -o_ci_deps | Out-Null; Assert-Ok "Extract OpenSSL archive failed"
+          curl.exe -fsSL -o _ci_deps/srslist.h "https://raw.githubusercontent.com/throneproj/routeprofiles/rule-set/srslist.h"; Assert-Ok "Download srslist.h failed"
+          curl.exe -fsSL -o _ci_deps/updater.exe "https://github.com/throneproj/updater/releases/latest/download/updater-windows-x64.exe"; Assert-Ok "Download updater.exe failed"
+          curl.exe -fsSL -o _ci_deps/protoc.zip "https://github.com/protocolbuffers/protobuf/releases/download/v$env:PROTOC_VERSION/protoc-$env:PROTOC_VERSION-win64.zip"; Assert-Ok "Download protoc failed"
           Expand-Archive _ci_deps/protoc.zip -DestinationPath _ci_deps/protoc -Force
-          git clone --depth 1 https://github.com/throneproj/dashboard.git _ci_deps/dashboard-src
+          git clone --depth 1 -b gh-pages https://github.com/SagerNet/sing-box-dashboard.git _ci_deps/dashboard-src; Assert-Ok "Clone sing-box-dashboard failed"
           New-Item -ItemType Directory -Force res/dashboard | Out-Null
           Copy-Item "_ci_deps/dashboard-src/*" res/dashboard -Recurse -Force
           Remove-Item -Recurse -Force res/dashboard/.git -ErrorAction SilentlyContinue
+          if (-not (Test-Path res/dashboard/index.html)) { throw "res/dashboard/index.html missing after copy" }
 
       - name: Build & test throne_fast_core.dll
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          function Assert-Ok([string]$msg) { if ($LASTEXITCODE -ne 0) { throw "$msg (exit $LASTEXITCODE)" } }
           cd throne_fast_core
-          cargo fmt --check
-          cargo clippy --all-targets -- -D warnings
-          cargo test --release
-          cargo build --release
+          cargo fmt --check; Assert-Ok "cargo fmt failed"
+          cargo clippy --all-targets -- -D warnings; Assert-Ok "cargo clippy failed"
+          cargo test --release; Assert-Ok "cargo test failed"
+          cargo build --release; Assert-Ok "cargo build failed"
 
       - name: Generate protobufs, test Go core, and build ThroneCore.exe + libcronet.dll
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          function Assert-Ok([string]$msg) { if ($LASTEXITCODE -ne 0) { throw "$msg (exit $LASTEXITCODE)" } }
           $env:PATH = "$PWD\_ci_deps\protoc\bin;$(go env GOPATH)\bin;$env:PATH"
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12; Assert-Ok "go install protoc-gen-go failed"
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2; Assert-Ok "go install protoc-gen-go-grpc failed"
           Push-Location core\gen
-          protoc -I . --go_out=. --go-grpc_out=. libcore.proto
+          protoc -I . --go_out=. --go-grpc_out=. libcore.proto; Assert-Ok "protoc failed"
           Pop-Location
           $env:CGO_ENABLED = "0"
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           $env:THRONE_FAST_CORE_DLL = "$PWD\throne_fast_core\target\release\throne_fast_core.dll"
           Push-Location core
-          go vet ./internal/fastcore ./internal/probe ./internal/rpc ./internal/rulematch ./internal/scan
-          go test -count=1 ./internal/fastcore ./internal/probe ./internal/rpc ./internal/rulematch ./internal/scan
-          go test -run=NONE -bench=. -benchtime=500ms -cpuprofile=scan.pgo ./internal/scan
-          go test -run=NONE -bench=. -benchtime=500ms -cpuprofile=rulematch.pgo ./internal/rulematch
-          cmd /c "go tool pprof -proto scan.pgo rulematch.pgo > default.pgo"
+          go vet ./internal/fastcore ./internal/probe ./internal/rpc ./internal/rulematch ./internal/scan; Assert-Ok "go vet failed"
+          go test -count=1 ./internal/fastcore ./internal/probe ./internal/rpc ./internal/rulematch ./internal/scan; Assert-Ok "go test failed"
+          go test -run=NONE -bench=. -benchtime=500ms -cpuprofile=scan.pgo ./internal/scan; Assert-Ok "scan pgo failed"
+          go test -run=NONE -bench=. -benchtime=500ms -cpuprofile=rulematch.pgo ./internal/rulematch; Assert-Ok "rulematch pgo failed"
+          cmd /c "go tool pprof -proto scan.pgo rulematch.pgo > default.pgo"; Assert-Ok "pprof merge failed"
           $ver = (go list -m -f '{{.Version}}' github.com/sagernet/sing-box)
           $tags = "with_clash_api,with_quic,with_wireguard,with_utls,with_dhcp,with_tailscale,with_openvpn,with_openconnect,badlinkname,tfogo_checklinkname0,with_purego,with_naive_outbound"
           New-Item -ItemType Directory -Force "$PWD\..\build" | Out-Null
-          go build -pgo=auto -v -o "$PWD\..\build\ThroneCore.exe" -trimpath -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=$ver' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0" -tags $tags .
+          go build -pgo=auto -v -o "$PWD\..\build\ThroneCore.exe" -trimpath -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=$ver' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0" -tags $tags .; Assert-Ok "go build failed"
           Remove-Item -Force scan.pgo, rulematch.pgo, default.pgo -ErrorAction SilentlyContinue
           $cronetMod = "github.com/sagernet/cronet-go/lib/windows_amd64"
-          go mod download $cronetMod
+          go mod download $cronetMod; Assert-Ok "go mod download cronet failed"
           $cronetDir = (go list -m -f '{{.Dir}}' $cronetMod)
           Copy-Item "$cronetDir\libcronet.dll" "$PWD\..\_ci_deps\libcronet.dll" -Force
           Pop-Location
@@ -114,25 +123,29 @@ jobs:
       - name: Build Throne.exe (Qt 6.12.1 + Rust) and run integration & smoke tests
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          function Assert-Ok([string]$msg) { if ($LASTEXITCODE -ne 0) { throw "$msg (exit $LASTEXITCODE)" } }
           $env:CMAKE_PREFIX_PATH = "$PWD\_ci_deps\Qt\lib\cmake"
           $env:OPENSSL_ROOT_DIR = "$PWD\_ci_deps\openssl"
           $verTag = if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith("v")) { $env:GITHUB_REF_NAME.TrimStart("v") } else { "1.4.2-rust" }
-          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_THRONE_FAST_CORE=ON -DINPUT_VERSION="$verTag"
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_THRONE_FAST_CORE=ON -DINPUT_VERSION="$verTag"; Assert-Ok "cmake configure Throne failed"
           Copy-Item _ci_deps/srslist.h build/srslist.h -Force
-          cmake --build build --parallel
-          cmake -B _ci_deps/tests_build -S tests -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build _ci_deps/tests_build --parallel
-          .\_ci_deps\tests_build\cpp_fast_core_test.exe
-          .\_ci_deps\tests_build\qt_fast_integration_test.exe
-          .\build\Throne.exe --headless --version
+          cmake --build build --parallel; Assert-Ok "cmake build Throne failed"
+          cmake -B _ci_deps/tests_build -S tests -G Ninja -DCMAKE_BUILD_TYPE=Release -DTHRONE_SRSLIST_DIR="$PWD\_ci_deps"; Assert-Ok "cmake configure tests failed"
+          cmake --build _ci_deps/tests_build --parallel; Assert-Ok "cmake build tests failed"
+          .\_ci_deps\tests_build\cpp_fast_core_test.exe; Assert-Ok "cpp_fast_core_test failed"
+          .\_ci_deps\tests_build\qt_fast_integration_test.exe; Assert-Ok "qt_fast_integration_test failed"
+          .\build\Throne.exe --headless --version; Assert-Ok "Throne --headless --version failed"
 
       - name: Package WiX v5 MSI installer & SHA256SUMS.txt
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 5.*
+          $ErrorActionPreference = "Stop"
+          function Assert-Ok([string]$msg) { if ($LASTEXITCODE -ne 0) { throw "$msg (exit $LASTEXITCODE)" } }
+          dotnet tool install --global wix --version 5.*; Assert-Ok "install wix failed"
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
-          wix extension add -g WixToolset.UI.wixext
-          $msiVer = if ("${{ inputs.msi_version }}") { "${{ inputs.msi_version }}" } else { "1.4.2.3" }
+          wix extension add -g WixToolset.UI.wixext; Assert-Ok "install wix UI extension failed"
+          $msiVer = if ("${{ inputs.msi_version }}") { "${{ inputs.msi_version }}" } elseif ($env:GITHUB_REF_NAME -match '^v(\d+\.\d+\.\d+)-rust\.(\d+)$') { "$($Matches[1]).$($Matches[2])" } else { "1.4.2.5" }
           .\installer\build-msi.ps1 `
             -ThroneExe "$PWD\build\Throne.exe" `
             -ThroneCoreExe "$PWD\build\ThroneCore.exe" `
@@ -160,13 +173,19 @@ jobs:
 
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = if ((Test-Path env:GITHUB_REF_NAME) -and ($env:GITHUB_REF_TYPE -eq 'tag')) { $env:GITHUB_REF_NAME } else { "${{ inputs.tag }}" }
-          gh release view $tag 2>$null
-          if ($LASTEXITCODE -ne 0) {
+          $prevPref = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          gh release view $tag 2>&1 | Out-Null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = $prevPref
+          if (-not $exists) {
             gh release create $tag installer/Throne-1.4.2-rust-x64-Setup.msi installer/SHA256SUMS.txt --title "Throne-Rust $tag (Windows x64 + MSI Installer)" --generate-notes
           } else {
             gh release upload $tag installer/Throne-1.4.2-rust-x64-Setup.msi installer/SHA256SUMS.txt --clobber
           }
+          if ($LASTEXITCODE -ne 0) { throw "GitHub Release upload failed (exit $LASTEXITCODE)" }
