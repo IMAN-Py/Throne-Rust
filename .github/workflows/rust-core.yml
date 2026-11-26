@@ -80,8 +80,8 @@ jobs:
           $env:CGO_ENABLED = "0"
           $env:THRONE_FAST_CORE_DLL = "$PWD\throne_fast_core\target\release\throne_fast_core.dll"
           cd core
-          go vet ./internal/fastcore ./internal/probe ./internal/rpc ./internal/scan
-          go test -count=1 -v ./internal/fastcore ./internal/probe ./internal/rpc ./internal/scan
+          go vet ./internal/fastcore ./internal/probe ./internal/rpc ./internal/rulematch ./internal/scan
+          go test -count=1 -v ./internal/fastcore ./internal/probe ./internal/rpc ./internal/rulematch ./internal/scan
 
       - name: Engine/UI boundary check
         shell: pwsh

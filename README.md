@@ -38,12 +38,14 @@
 
 | Workload | Upstream / Scalar Baseline | Throne-Rust (`throne_fast_core.dll`) | Measured Gain |
 |---|---:|---:|---:|
-| **IPv4 LPM Routing** (500k lookups, 505 CIDRs) | `283.00 ns/lookup` | **`4.25 ns/lookup`** | **66.62x faster** |
-| **4 KB Buffer Hashing** (800 MB xxHash64) | `1.11 GB/s` | **`16.82 GB/s`** | **15.09x faster** |
+| **IPv4 LPM Routing** (500k lookups, 505 CIDRs) | `277.20 ns/lookup` | **`5.39 ns/lookup`** | **51.45x faster** |
+| **4 KB Buffer Hashing** (800 MB xxHash64) | `1.09 GB/s` | **`17.59 GB/s`** | **16.15x faster** |
+| **Route Rule Entry Matching** (`rulematch.Matched`, 41 domains) | `3,341 ns/op` (`42 allocs`) | **`285 ns/op`** (`1 alloc`) | **11.7x faster** |
 | **XDNS Wire TXT Reply Match** (Go zero-CGO -> Rust FFI) | `165.9 ns/op` | **`116.1 ns/op`** (0 allocs) | **1.43x faster** |
 | **Scan Target Batch Permutation** (1,024 v4+v6 targets) | `27.18 ns/target` | **`22.94 ns/target`** (0 allocs) | **1.185x faster** |
 | **Batch Outbound Probing** (`probe.runBatch`) | `2 ms × N` forced sleep | **0 ms forced sleep** | Eliminated |
 | **UI Profile Table & SQLite Reads** | `O(N)` LRU + `QJsonObject` | **`O(1)` `std::list` LRU + `idx_profiles_gid`** | Zero-copy & prefetched |
+| **Compiler & Link-Time Optimization** | Standard Release | **Go PGO (`-pgo=auto`) + Rust fat LTO + MSVC IPO/LTCG** | Full-stack |
 
 ---
 

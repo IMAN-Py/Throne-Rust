@@ -16,6 +16,47 @@ type Entry struct {
 	item R.RuleItem
 }
 
+type domainExactItem struct {
+	value string
+	desc  string
+}
+
+func (d domainExactItem) Match(metadata *adapter.InboundContext) bool {
+	host := metadata.Domain
+	if host == "" {
+		host = metadata.Destination.Fqdn
+	}
+	return host != "" && strings.EqualFold(host, d.value)
+}
+
+func (d domainExactItem) String() string { return d.desc }
+
+type domainSuffixItem struct {
+	value  string
+	hasDot bool
+	desc   string
+}
+
+func (d domainSuffixItem) Match(metadata *adapter.InboundContext) bool {
+	host := metadata.Domain
+	if host == "" {
+		host = metadata.Destination.Fqdn
+	}
+	if host == "" {
+		return false
+	}
+	n, m := len(host), len(d.value)
+	if d.hasDot {
+		return n >= m && strings.EqualFold(host[n-m:], d.value)
+	}
+	if n == m {
+		return strings.EqualFold(host, d.value)
+	}
+	return n > m && host[n-m-1] == '.' && strings.EqualFold(host[n-m:], d.value)
+}
+
+func (d domainSuffixItem) String() string { return d.desc }
+
 // ruleSetEntry probes one set of a rule_set list, the way sing-box's own item probes each of its sets.
 type ruleSetEntry struct {
 	tag         string
@@ -53,12 +94,22 @@ func Entries(rule option.Rule, ruleSet func(tag string) (adapter.RuleSet, bool))
 		}
 	}
 	for _, v := range r.Domain {
-		item, err := R.NewDomainItem([]string{v}, nil)
-		add("domain", item, err)
+		if v == "" {
+			continue
+		}
+		entries = append(entries, Entry{
+			key:  "domain",
+			item: domainExactItem{value: v, desc: "domain=" + v},
+		})
 	}
 	for _, v := range r.DomainSuffix {
-		item, err := R.NewDomainItem(nil, []string{v})
-		add("domain_suffix", item, err)
+		if v == "" {
+			continue
+		}
+		entries = append(entries, Entry{
+			key:  "domain_suffix",
+			item: domainSuffixItem{value: v, hasDot: v[0] == '.', desc: "domain_suffix=" + v},
+		})
 	}
 	for _, v := range r.DomainKeyword {
 		add("domain_keyword", R.NewDomainKeywordItem([]string{v}), nil)
@@ -102,15 +153,32 @@ func Entries(rule option.Rule, ruleSet func(tag string) (adapter.RuleSet, bool))
 
 // Matched names the first matching value of every field, e.g. "domain_suffix=github.com process_name=chrome.exe".
 func Matched(entries []Entry, metadata adapter.InboundContext) string {
+	if len(entries) == 0 {
+		return ""
+	}
 	metadata.ResetRuleCache()
-	var matched []string
+	var first string
+	var b strings.Builder
 	matchedKey := ""
 	for _, entry := range entries {
 		if entry.key == matchedKey || !entry.item.Match(&metadata) {
 			continue
 		}
-		matched = append(matched, entry.item.String())
+		s := entry.item.String()
+		if first == "" {
+			first = s
+		} else {
+			if b.Len() == 0 {
+				b.Grow(len(first) + 1 + len(s))
+				b.WriteString(first)
+			}
+			b.WriteByte(' ')
+			b.WriteString(s)
+		}
 		matchedKey = entry.key
 	}
-	return strings.Join(matched, " ")
+	if b.Len() > 0 {
+		return b.String()
+	}
+	return first
 }

@@ -917,6 +917,11 @@ set_target_properties(Throne PROPERTIES
 
 if (WIN32 AND MSVC)
     set_target_properties(Throne PROPERTIES UNITY_BUILD ON)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT THRONE_IPO_SUPPORTED OUTPUT THRONE_IPO_ERR)
+    if (THRONE_IPO_SUPPORTED)
+        set_property(TARGET Throne PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    endif ()
 endif ()
 set_property(SOURCE "3rdparty/SQLiteCpp/src/sqlite3.c" PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
 set_property(SOURCE "3rdparty/monocypher/monocypher.c" PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)

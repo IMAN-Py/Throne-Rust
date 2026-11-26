@@ -95,12 +95,16 @@ jobs:
           $env:GOARCH = "amd64"
           $env:THRONE_FAST_CORE_DLL = "$PWD\throne_fast_core\target\release\throne_fast_core.dll"
           Push-Location core
-          go vet ./internal/fastcore ./internal/probe ./internal/rpc ./internal/scan
-          go test -count=1 ./internal/fastcore ./internal/probe ./internal/rpc ./internal/scan
+          go vet ./internal/fastcore ./internal/probe ./internal/rpc ./internal/rulematch ./internal/scan
+          go test -count=1 ./internal/fastcore ./internal/probe ./internal/rpc ./internal/rulematch ./internal/scan
+          go test -run=NONE -bench=. -benchtime=500ms -cpuprofile=scan.pgo ./internal/scan
+          go test -run=NONE -bench=. -benchtime=500ms -cpuprofile=rulematch.pgo ./internal/rulematch
+          cmd /c "go tool pprof -proto scan.pgo rulematch.pgo > default.pgo"
           $ver = (go list -m -f '{{.Version}}' github.com/sagernet/sing-box)
           $tags = "with_clash_api,with_quic,with_wireguard,with_utls,with_dhcp,with_tailscale,with_openvpn,with_openconnect,badlinkname,tfogo_checklinkname0,with_purego,with_naive_outbound"
           New-Item -ItemType Directory -Force "$PWD\..\build" | Out-Null
-          go build -v -o "$PWD\..\build\ThroneCore.exe" -trimpath -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=$ver' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0" -tags $tags .
+          go build -pgo=auto -v -o "$PWD\..\build\ThroneCore.exe" -trimpath -ldflags "-w -s -X 'github.com/sagernet/sing-box/constant.Version=$ver' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0" -tags $tags .
+          Remove-Item -Force scan.pgo, rulematch.pgo, default.pgo -ErrorAction SilentlyContinue
           $cronetMod = "github.com/sagernet/cronet-go/lib/windows_amd64"
           go mod download $cronetMod
           $cronetDir = (go list -m -f '{{.Dir}}' $cronetMod)
