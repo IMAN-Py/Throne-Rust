@@ -142,9 +142,9 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           function Assert-Ok([string]$msg) { if ($LASTEXITCODE -ne 0) { throw "$msg (exit $LASTEXITCODE)" } }
-          dotnet tool install --global wix --version 5.*; Assert-Ok "install wix failed"
+          dotnet tool install --global wix --version 5.0.2; Assert-Ok "install wix failed"
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
-          wix extension add -g WixToolset.UI.wixext; Assert-Ok "install wix UI extension failed"
+          wix extension add -g WixToolset.UI.wixext/5.0.2; Assert-Ok "install wix UI extension failed"
           $msiVer = if ("${{ inputs.msi_version }}") { "${{ inputs.msi_version }}" } elseif ($env:GITHUB_REF_NAME -match '^v(\d+\.\d+\.\d+)-rust\.(\d+)$') { "$($Matches[1]).$($Matches[2])" } else { "1.4.2.5" }
           .\installer\build-msi.ps1 `
             -ThroneExe "$PWD\build\Throne.exe" `
