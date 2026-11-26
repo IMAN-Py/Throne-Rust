@@ -23,8 +23,9 @@ namespace Scanner {
     // The AmneziaWG junk WARP accepts (WarpPresets::kJunk*), with the rest of the AmneziaWG set cleared.
     void ApplyWarpJunk(Configs::wireguard &outbound);
 
-    // Points a WARP profile at entry with the junk (unless it has AmneziaWG) or HTTP/2 the run needed; an endpoint source
-    // that would replace the address becomes Own. False for a non-WARP profile or an entry that is not one address.
+    // Points a WARP profile at entry with the junk (unless it has AmneziaWG) or the HTTP/2 fallback (unless it is on
+    // HTTP/2 alone) the run needed; an endpoint source that would replace the address becomes Own. False for a non-WARP
+    // profile or an entry that is not one address.
     bool ApplyWarpEndpoint(Configs::Profile &profile, const Configs::IpListEntry &entry, bool junk, bool http2);
 
     // "wireguard" | "masque" for a WARP scan profile; "" otherwise.
@@ -33,7 +34,7 @@ namespace Scanner {
     // The profile's own sing-box endpoint object for the core's WARP probe; nothing is overridden.
     [[nodiscard]] QJsonObject WarpProbeEndpoint(const Configs::Profile &profile, QString *error);
 
-    // Always a deep copy, never the live repo object.
+    // A resolver scan's DNS tunnel profile; always a deep copy, never the live repo object.
     std::shared_ptr<Configs::Profile> ResolveScanBase(const Configs::IpScan &scan, QString *error);
 
     // A deep copy of a WARP profile, an editor's unsaved draft too; nullptr with *error set otherwise.

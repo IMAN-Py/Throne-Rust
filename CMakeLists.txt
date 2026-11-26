@@ -294,6 +294,7 @@ set(PROJECT_SOURCES
         include/ui/utils/ProfilesTableFilterHeader.h
         include/ui/utils/ConnectionsFilterHeader.h
         include/ui/utils/HeaderSortArrow.h
+        include/ui/utils/ItemViewFit.h
         include/ui/utils/ConnectionsTreeModel.h
         src/ui/utils/ConnectionsTreeModel.cpp
         include/ui/utils/ConnectionsTreeFilterProxyModel.h
@@ -463,13 +464,8 @@ set(PROJECT_SOURCES
         include/ui/utils/ReorderListWidget.h
         src/ui/utils/ReorderListWidget.cpp
 
-        src/ui/scanner/dialog_scanner.cpp
-        include/ui/scanner/dialog_scanner.h
-        include/ui/scanner/dialog_scanner.ui
-        src/ui/scanner/ScanItem.cpp
-        include/ui/scanner/ScanItem.h
-        src/ui/scanner/dialog_new_scan.cpp
-        include/ui/scanner/dialog_new_scan.h
+        src/ui/scanner/ScannerUi.cpp
+        include/ui/scanner/ScannerUi.h
         src/ui/scanner/dialog_scan_instance.cpp
         include/ui/scanner/dialog_scan_instance.h
         include/ui/scanner/dialog_scan_instance.ui

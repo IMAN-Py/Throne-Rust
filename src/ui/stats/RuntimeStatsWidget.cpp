@@ -15,6 +15,7 @@
 #include "include/global/Utils.hpp"
 #include "include/global/ExitLookup.hpp"
 #include "include/ui/setting/ThemeManager.hpp"
+#include "include/ui/utils/ItemViewFit.h"
 #include "include/ui/utils/ServiceCheckHtml.h"
 #include "include/ui/utils/ServiceIcons.h"
 #include "include/ui/widget/LiveChart.h"
@@ -148,6 +149,7 @@ RuntimeStatsWidget::RuntimeStatsWidget(QWidget* parent) : QWidget(parent), ui(ne
 
     ui->groupEndpoints->setVisible(false);
     auto* endpoints = ui->endpointsTable;
+    endpoints->setItemDelegate(new ItemViewFit::Delegate(endpoints));
     endpoints->verticalHeader()->setVisible(false);
     endpoints->setEditTriggers(QAbstractItemView::NoEditTriggers);
     endpoints->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -329,18 +331,14 @@ void RuntimeStatsWidget::refreshLive() {
     if (!connBusy_.exchange(true)) {
         QPointer<RuntimeStatsWidget> self(this);
         runOnNewThread([self]() {
-            const auto conns = API::defaultClient->QueryConnections();
-            int tcp = 0, udp = 0, total = 0;
-            for (const auto& c : conns.active) {
-                ++total;
-                const QString net = QString::fromStdString(c.network.value());
-                if (net == QStringLiteral("tcp")) ++tcp;
-                else if (net == QStringLiteral("udp")) ++udp;
-            }
-            runOnUiThread([self, tcp, udp, total]() {
+            bool ok = false;
+            const auto count = API::defaultClient->QueryConnectionCount(&ok);
+            const int tcp = count.tcp.value_or(0);
+            const int udp = count.udp.value_or(0);
+            runOnUiThread([self, tcp, udp]() {
                 if (!self) return;
                 self->ui->vConns->setText(
-                    RuntimeStatsWidget::tr("%1 active   ·   %2 TCP   ·   %3 UDP").arg(total).arg(tcp).arg(udp));
+                    RuntimeStatsWidget::tr("%1 active   ·   %2 TCP   ·   %3 UDP").arg(tcp + udp).arg(tcp).arg(udp));
                 self->connBusy_.store(false);
             });
         });

@@ -30,7 +30,7 @@
 
 ---
 
-**Throne-Rust** tracks the latest upstream [throneproj/Throne](https://github.com/throneproj/Throne) codebase (`dev` @ `d1a2ca78`, Qt `6.12.1`, `sing-box v1.15.0-alpha.13`, `Xray-core 26.11.9`, Go `1.27.0`) and pairs both the C++20/Qt6 desktop client and the Go proxy core with a shared LTO-compiled Rust acceleration library (**`throne_fast_core.dll`**, ABI `2.1`) alongside algorithmic hot-path rewrites guided by **`fast-anything` CPU profiling**.
+**Throne-Rust** tracks the latest upstream [throneproj/Throne](https://github.com/throneproj/Throne) codebase (`dev` @ `af4f1599`, Qt `6.12.1`, `sing-box` + `Xray-core`, Go `1.27.0`) and pairs both the C++20/Qt6 desktop client and the Go proxy core with a shared LTO-compiled Rust acceleration library (**`throne_fast_core.dll`**, ABI `2.1`) alongside algorithmic hot-path rewrites guided by **`fast-anything` CPU profiling**.
 
 ---
 

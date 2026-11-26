@@ -70,7 +70,6 @@ class TrayProfileSelector;
 class TrayOtpCodes;
 class GlobalHotkeys;
 class DialogVpnAuth;
-class DialogScanner;
 class DialogIpLists;
 class DialogRuleTester;
 class CommandPalette;
@@ -164,8 +163,6 @@ public:
 
     void showIpListsDialog(int selectListId = -1);
 
-    void showScannerDialog();
-
     void refreshScannerDataView(bool force = false);
 
 signals:
@@ -191,8 +188,6 @@ private slots:
     void on_menu_preset_settings_triggered();
 
     void on_menu_otp_manager_triggered();
-
-    void on_menu_scanner_triggered();
 
     void on_menu_integration_settings_triggered();
 
@@ -408,6 +403,7 @@ private:
 
     QList<int> get_now_selected_list();
     void refresh_startstop_button();
+    void refresh_tray_tooltip();
     void refresh_pin_action();
     void refresh_action_states();
 
@@ -559,7 +555,6 @@ private:
     QHash<QString, QPointer<QMessageBox>> m_policyBoxes;
 
     QPointer<DialogVpnAuth> m_vpnAuthDialog;
-    QPointer<DialogScanner> m_scannerDialog;
     QPointer<DialogIpLists> m_ipListsDialog;
     QPointer<DialogRuleTester> m_ruleTesterDialog;
     QHash<int, QString> m_scannerNames;
@@ -660,6 +655,8 @@ private:
     bool confirmRestartProgram() override;
 
     void testSessionBusy(const QString &text) override;
+
+    void testsInconclusive(const QList<int> &profileIds) override;
 
     void exitProgram(ExitReason reason, bool unattended) override;
 

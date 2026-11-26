@@ -66,6 +66,9 @@ namespace Configs {
         // Without loading the rules; nullopt when the profile follows the global DNS settings or does not exist.
         std::optional<RouteDns> GetCustomDns(int id) const;
 
+        // Without loading the rules; nullopt when the profile does not exist.
+        std::optional<QString> GetRouteProfileName(int id) const;
+
         // Without loading it.
         bool HasRouteProfile(int id) const;
 
@@ -80,9 +83,13 @@ namespace Configs {
         // Saves the list and deletes removedIds; a profile created elsewhere meanwhile is left alone.
         void UpdateRouteProfiles(const QList<std::shared_ptr<RouteProfile>>& routeProfiles, const QList<int>& removedIds);
 
+        // In the user's order, which every list and menu of routing profiles follows.
         QList<int> GetAllRouteProfileIds() const;
 
         QList<std::shared_ptr<RouteProfile>> GetAllRouteProfiles() const;
+
+        // Unknown ids are skipped and unlisted profiles follow in their current order; returns whether the order changed.
+        bool SetRouteProfilesOrder(const QList<int>& ids);
         
         // No-op unless id >= 0.
         bool Save(const std::shared_ptr<RouteProfile>& routeProfile);

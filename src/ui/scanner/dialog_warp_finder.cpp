@@ -91,6 +91,9 @@ DialogWarpFinder::DialogWarpFinder(std::shared_ptr<Configs::Profile> base_, cons
     resultsView->setUniformRowHeights(true);
     resultsView->setSelectionMode(QAbstractItemView::SingleSelection);
     resultsView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    // windows11 fills a selected row with the accent only in a striped view; unstriped it gets a faint tint.
+    resultsView->setAlternatingRowColors(true);
+    resultsView->setAllColumnsShowFocus(true);
     auto *header = resultsView->header();
     header->setStretchLastSection(false);
     header->setSectionResizeMode(kWarpFinderEndpointColumn, QHeaderView::Stretch);
@@ -243,7 +246,7 @@ void DialogWarpFinder::refresh() {
                       "turns them on.");
     }
     if (live.warpHttp2) {
-        notices << tr("HTTP/3 is blocked on this network, but HTTP/2 gets through. Using an endpoint switches the profile to HTTP/2.");
+        notices << tr("HTTP/3 is blocked on this network, but HTTP/2 gets through. Using an endpoint turns on the fallback to HTTP/2.");
     }
     if (!overrideOrigin.isEmpty()) {
         notices << tr("This profile dials %1 instead of its own address. Using an endpoint switches it back to its own address.")
