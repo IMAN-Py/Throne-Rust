@@ -1,0 +1,11 @@
+# Exclude vendored third-party libraries, translations, themes, and UI XML from GitHub Linguist stats
+3rdparty/** linguist-vendored
+res/** linguist-vendored
+dist/** linguist-vendored
+*.ui linguist-vendored
+*.qrc linguist-vendored
+*.ts linguist-vendored
+*.svg linguist-vendored
+
+# Keep shell scripts LF for cross-platform CI runners
+*.sh text eol=lf
